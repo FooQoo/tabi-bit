@@ -1,7 +1,7 @@
 import {
   fetchPhotoMediaUri,
   searchPlacePhotoNames,
-} from "~/server/infrastructure/google-places";
+} from "~/server/repositories/google-places";
 
 const MAX_PHOTOS = 5;
 

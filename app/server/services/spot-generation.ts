@@ -6,7 +6,7 @@ import {
   type GeneratedSpot,
   type GenerateSpotsRequest,
 } from "~/domain/spot/spot";
-import { streamSpotElements } from "~/server/infrastructure/ai";
+import { streamSpotElements } from "~/server/repositories/ai";
 
 function buildPrompt({
   travelImage,
