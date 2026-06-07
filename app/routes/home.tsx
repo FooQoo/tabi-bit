@@ -179,8 +179,8 @@ export default function Home() {
   const [spots, setSpots] = useState<GeneratedSpot[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [maxDurationMinutes, setMaxDurationMinutes] = useState("");
-  const [maxBudgetYen, setMaxBudgetYen] = useState("");
+  const [maxDurationMinutes, setMaxDurationMinutes] = useState("360");
+  const [maxBudgetYen, setMaxBudgetYen] = useState("5000");
   const [startTime, setStartTime] = useState("10:00");
   const [sessionHistory, setSessionHistory] = useState<SessionEntry[]>([]);
   const [pinnedSpotIds, setPinnedSpotIds] = useState<Set<string>>(new Set());
