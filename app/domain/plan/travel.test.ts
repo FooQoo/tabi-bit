@@ -61,6 +61,29 @@ describe("estimateTravel", () => {
     expect(leg.fromSpotId).toBe("a");
     expect(leg.toSpotId).toBe("b");
   });
+
+  it("陸上のみのレグは crossesWater=false", () => {
+    const tokyo = makeSpot({ latitude: 35.681, longitude: 139.767 });
+    const shinjuku = makeSpot({ latitude: 35.69, longitude: 139.7 });
+    expect(estimateTravel(tokyo, shinjuku).crossesWater).toBe(false);
+  });
+
+  it("海を渡るレグは crossesWater=true で、同距離の陸上レグより所要時間が長い", () => {
+    // 横浜〜千葉（東京湾を横断）。
+    const yokohama = makeSpot({ latitude: 35.44, longitude: 139.64 });
+    const chiba = makeSpot({ latitude: 35.61, longitude: 140.11 });
+    const overWater = estimateTravel(yokohama, chiba);
+
+    // ほぼ同じ直線距離だが陸上で完結する対照レグ（埼玉内陸へ北上）。
+    const inland = estimateTravel(
+      makeSpot({ latitude: 35.9, longitude: 139.6 }),
+      makeSpot({ latitude: 35.86, longitude: 140.07 }),
+    );
+
+    expect(overWater.crossesWater).toBe(true);
+    expect(inland.crossesWater).toBe(false);
+    expect(overWater.minutes).toBeGreaterThan(inland.minutes);
+  });
 });
 
 describe("routeTravelMinutes", () => {

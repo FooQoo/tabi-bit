@@ -8,6 +8,8 @@ export type TravelLeg = {
   distanceKm: number;
   minutes: number;
   mode: TravelMode;
+  /** 直線が海上を通る（道路では大きく迂回／到達困難）レグか。 */
+  crossesWater: boolean;
 };
 
 export type PlanConstraints = {

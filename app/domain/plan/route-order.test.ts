@@ -4,14 +4,17 @@ import { orderSpotsByRoute } from "~/domain/plan/route-order";
 import { routeTravelMinutes } from "~/domain/plan/travel";
 import { makeSpot } from "~/domain/plan/__fixtures__/spot";
 
-/** 緯度方向に等間隔で並ぶスポット群（鉄道主要府県外＝対称な車移動）。 */
+/**
+ * 緯度方向に等間隔で並ぶスポット群（鉄道主要府県外＝対称な車移動）。
+ * 水域横断ペナルティの影響を受けないよう、北海道内陸（道央）の陸地に並べる。
+ */
 function collinearSpots(count: number) {
   return Array.from({ length: count }, (_, i) =>
     makeSpot({
       id: `p${i}`,
       prefecture: "北海道",
-      latitude: 43.0 + i * 0.1,
-      longitude: 141.0,
+      latitude: 43.3 + i * 0.08,
+      longitude: 142.4,
     }),
   );
 }

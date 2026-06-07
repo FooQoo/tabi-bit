@@ -406,6 +406,12 @@ function fitsConstraints(
     if (tooCloseMeal) return false;
   }
 
+  // 海を挟むスポット同士は、直線距離ベースの見積もりでは現実の到達性を
+  // 過小評価しやすい。スコア加点で押し切られないよう候補段階で拒否する。
+  if (crossesWaterFromAnySelectedSpot(selectedSpots, candidate)) {
+    return false;
+  }
+
   if (constraints.maxBudgetYen !== undefined) {
     if (sumBudgetMax(tentative) > constraints.maxBudgetYen) return false;
   }
@@ -417,6 +423,15 @@ function fitsConstraints(
   }
 
   return true;
+}
+
+function crossesWaterFromAnySelectedSpot(
+  selectedSpots: GeneratedSpot[],
+  candidate: GeneratedSpot,
+): boolean {
+  return selectedSpots.some(
+    (spot) => estimateTravel(spot, candidate).crossesWater,
+  );
 }
 
 /** 順路中の非ピンスポットのうち、最もスコアの低いスポット id を返す。 */

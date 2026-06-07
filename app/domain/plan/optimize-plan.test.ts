@@ -5,7 +5,11 @@ import {
   optimizePlan,
   PLAN_PROFILES,
 } from "~/domain/plan/optimize-plan";
-import { calculateDistanceKm, routeTravelMinutes } from "~/domain/plan/travel";
+import {
+  calculateDistanceKm,
+  estimateTravel,
+  routeTravelMinutes,
+} from "~/domain/plan/travel";
 import { makeSpot } from "~/domain/plan/__fixtures__/spot";
 
 const noConstraints = {};
@@ -272,6 +276,49 @@ describe("generatePlans", () => {
     expect(luxury.totalBudgetYen.max).toBeGreaterThan(balanced.totalBudgetYen.max);
     // 件数ではなく予算が制約になるよう、上限の 8 割以上まで使う。
     expect(luxury.totalBudgetYen.max).toBeGreaterThanOrEqual(24000);
+  });
+
+  it("贅沢でもピン留め済みスポットから海を渡る候補は採用しない", () => {
+    const shiogama = makeSpot({
+      id: "shiogama",
+      name: "塩竈市街",
+      prefecture: "宮城県",
+      latitude: 38.315,
+      longitude: 141.022,
+      budgetYen: { min: 0, max: 0 },
+    });
+    const katsurashima = makeSpot({
+      id: "katsurashima",
+      name: "桂島",
+      prefecture: "宮城県",
+      latitude: 38.329,
+      longitude: 141.106,
+      budgetYen: { min: 3500, max: 4500 },
+    });
+    const inland = makeSpot({
+      id: "inland",
+      name: "多賀城",
+      prefecture: "宮城県",
+      latitude: 38.293,
+      longitude: 141.005,
+      budgetYen: { min: 1000, max: 1500 },
+    });
+    const luxury = PLAN_PROFILES.find((p) => p.id === "luxury");
+
+    expect(estimateTravel(shiogama, katsurashima).crossesWater).toBe(true);
+    expect(estimateTravel(shiogama, inland).crossesWater).toBe(false);
+
+    const plan = optimizePlan(
+      [shiogama, katsurashima, inland],
+      { maxDurationMinutes: 360, maxBudgetYen: 5000 },
+      new Set([shiogama.id]),
+      noBlacklist,
+      luxury,
+    );
+
+    expect(plan.spots.map((spot) => spot.id)).not.toContain("katsurashima");
+    expect(plan.spots.map((spot) => spot.id)).toContain("inland");
+    expect(plan.travelLegs.some((leg) => leg.crossesWater)).toBe(false);
   });
 
   it("非ピンのプランは所要時間上限を超えない（最終順で超えたら削る）", () => {
