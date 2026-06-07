@@ -263,6 +263,8 @@ describe("generatePlans", () => {
     // 上限内に収まりつつ、バランス案より高い総額になる。
     expect(luxury.totalBudgetYen.max).toBeLessThanOrEqual(30000);
     expect(luxury.totalBudgetYen.max).toBeGreaterThan(balanced.totalBudgetYen.max);
+    // 件数ではなく予算が制約になるよう、上限の 8 割以上まで使う。
+    expect(luxury.totalBudgetYen.max).toBeGreaterThanOrEqual(24000);
   });
 
   it("飲食系（食事・カフェ）を連続させない", () => {
