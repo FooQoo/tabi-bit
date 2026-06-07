@@ -57,7 +57,7 @@ function* permute(spots: GeneratedSpot[]): Generator<GeneratedSpot[]> {
   }
 }
 
-function nearestNeighborOrder(spots: GeneratedSpot[]): GeneratedSpot[] {
+export function nearestNeighborOrder(spots: GeneratedSpot[]): GeneratedSpot[] {
   // 各始点から貪欲に最近スポットを辿り、最も短い経路を採用する（近似の初期解）。
   let best: GeneratedSpot[] | null = null;
   let bestCost = Number.POSITIVE_INFINITY;

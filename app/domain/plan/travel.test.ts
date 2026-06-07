@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   calculateDistanceKm,
+  clearTravelCache,
   decideTravelMode,
   estimateTravel,
   routeTravelMinutes,
@@ -79,5 +80,21 @@ describe("routeTravelMinutes", () => {
   it("1 件以下なら 0", () => {
     expect(routeTravelMinutes([])).toBe(0);
     expect(routeTravelMinutes([makeSpot()])).toBe(0);
+  });
+});
+
+describe("estimateTravel のメモ化", () => {
+  it("キャッシュの有無で結果が変わらない", () => {
+    const a = makeSpot({ id: "ca", latitude: 35.0, longitude: 139.0 });
+    const b = makeSpot({ id: "cb", latitude: 35.3, longitude: 139.2 });
+
+    clearTravelCache();
+    const fresh = estimateTravel(a, b);
+    const cached = estimateTravel(a, b); // 2 回目はキャッシュ
+    expect(cached).toEqual(fresh);
+
+    clearTravelCache();
+    const afterClear = estimateTravel(a, b);
+    expect(afterClear).toEqual(fresh);
   });
 });

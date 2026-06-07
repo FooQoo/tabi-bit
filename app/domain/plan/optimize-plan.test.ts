@@ -99,6 +99,27 @@ describe("optimizePlan", () => {
     expect(plan.durationExceeded).toBe(false);
   });
 
+  it("多数スポット＋所要時間制約でも限度内に収める", () => {
+    // 内ループで全順列探索していた頃に重くなっていた経路。
+    // 件数を増やしても破綻せず、限度内に収まることを確認する。
+    const spots = Array.from({ length: 60 }, (_, i) =>
+      makeSpot({
+        id: `s${i}`,
+        durationMinutes: 90,
+        latitude: 35 + (i % 10) * 0.03,
+        longitude: 139 + Math.floor(i / 10) * 0.03,
+      }),
+    );
+    const plan = optimizePlan(
+      spots,
+      { maxDurationMinutes: 360 },
+      noPins,
+      noBlacklist,
+    );
+    expect(plan.totalDurationMinutes).toBeLessThanOrEqual(360);
+    expect(plan.durationExceeded).toBe(false);
+  });
+
   it("予算の制約を超えないように非ピンを抑える", () => {
     const spots = Array.from({ length: 8 }, (_, i) =>
       makeSpot({ id: `s${i}`, budgetYen: { min: 1000, max: 2000 } }),

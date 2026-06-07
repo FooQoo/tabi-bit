@@ -1,6 +1,9 @@
 import type { GeneratedSpot, SpotCategory } from "~/domain/spot/spot";
 import type { OptimizedPlan, PlanConstraints } from "~/domain/plan/plan";
-import { orderSpotsByRoute } from "~/domain/plan/route-order";
+import {
+  nearestNeighborOrder,
+  orderSpotsByRoute,
+} from "~/domain/plan/route-order";
 import {
   buildSchedule,
   DEFAULT_START_MINUTES,
@@ -312,7 +315,11 @@ function travelToNearest(
 
 /**
  * 候補を加えても制約内に収まるか判定する。
- * 所要時間は最適化後の訪問順で評価し、表示プランと整合させる。
+ *
+ * 所要時間は nearest-neighbor 経路の「上界」で評価する。上界が収まれば
+ * 厳密な最短順も必ず収まるため、限度超過のプランを選んでしまうことはない
+ * （厳密な最短順は最終段で一度だけ求める）。内ループで全順列探索していた
+ * のをやめ、件数が増えても破綻しないようにする。
  */
 function fitsConstraints(
   selectedSpots: GeneratedSpot[],
@@ -326,8 +333,8 @@ function fitsConstraints(
   }
 
   if (constraints.maxDurationMinutes !== undefined) {
-    const ordered = orderSpotsByRoute(tentative);
-    const duration = sumStayMinutes(ordered) + routeTravelMinutes(ordered);
+    const travelUpperBound = routeTravelMinutes(nearestNeighborOrder(tentative));
+    const duration = sumStayMinutes(tentative) + travelUpperBound;
     if (duration > constraints.maxDurationMinutes) return false;
   }
 
