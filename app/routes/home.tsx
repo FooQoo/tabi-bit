@@ -55,6 +55,7 @@ import {
   MAX_SPOTS_PER_SESSION,
   SPOT_BATCH_SIZE,
   type SpotCategory,
+  TRAVEL_IMAGE_MAX_LENGTH,
   spotCategoryLabels,
   timeOfDayLabels,
 } from "~/domain/spot/spot";
@@ -207,6 +208,7 @@ export default function Home() {
   const [blacklistedSpotIds, setBlacklistedSpotIds] = useState<Set<string>>(new Set());
   const isGeneratingRef = useRef(false);
   const spotsRef = useRef<GeneratedSpot[]>([]);
+  const travelImageInputRef = useRef<HTMLTextAreaElement>(null);
   const activeSessionRef = useRef<{
     id: string;
     input: FeedInput;
@@ -217,6 +219,13 @@ export default function Home() {
     () => prefectures.find((prefecture) => prefecture.code === prefectureCode),
     [prefectureCode],
   );
+  const resizeTravelImageInput = useCallback(() => {
+    const input = travelImageInputRef.current;
+    if (!input) return;
+
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }, []);
   const planConstraints = useMemo(
     () => ({
       maxDurationMinutes: parsePositiveInteger(maxDurationMinutes),
@@ -262,8 +271,11 @@ export default function Home() {
     });
   }, []);
 
+  const travelImageLength = travelImage.length;
   const canSubmit =
-    travelImage.trim().length > 0 && Boolean(selectedPrefecture);
+    travelImage.trim().length > 0 &&
+    travelImageLength <= TRAVEL_IMAGE_MAX_LENGTH &&
+    Boolean(selectedPrefecture);
   const hasReachedLimit = spots.length >= MAX_SPOTS_PER_SESSION;
   const [selectedProfileId, setSelectedProfileId] = useState("balanced");
   const plans = useMemo(
@@ -334,6 +346,10 @@ export default function Home() {
   useEffect(() => {
     spotsRef.current = spots;
   }, [spots]);
+
+  useEffect(() => {
+    resizeTravelImageInput();
+  }, [resizeTravelImageInput, travelImage]);
 
   useEffect(() => {
     const session = activeSessionRef.current;
@@ -513,12 +529,19 @@ export default function Home() {
             }}
           >
             <div className="flex flex-col gap-3 rounded-[2rem] border border-border/80 bg-card/85 p-3 shadow-xl shadow-black/5 backdrop-blur md:flex-row">
-              <Input
+              <textarea
                 aria-label="旅のイメージ"
-                className="!h-14 flex-1 border-0 bg-transparent px-5 text-base shadow-none focus-visible:ring-0 md:text-lg"
-                onChange={(event) => setTravelImage(event.target.value)}
+                aria-describedby="travel-image-length"
+                className="min-h-14 w-full resize-none overflow-hidden rounded-[1.25rem] border-0 bg-transparent px-5 py-4 text-base leading-6 shadow-none outline-none [overflow-wrap:anywhere] placeholder:text-muted-foreground focus-visible:ring-0 md:flex-1 md:text-lg"
+                maxLength={TRAVEL_IMAGE_MAX_LENGTH}
+                onChange={(event) =>
+                  setTravelImage(
+                    event.target.value.slice(0, TRAVEL_IMAGE_MAX_LENGTH),
+                  )
+                }
                 placeholder="静かな海辺で本を読みたい"
-                style={{ height: "3.5rem" }}
+                ref={travelImageInputRef}
+                rows={1}
                 value={travelImage}
               />
               <div className="flex flex-col gap-3 md:w-64 md:flex-row">
@@ -549,6 +572,12 @@ export default function Home() {
                 </Button>
               </div>
             </div>
+            <p
+              className="px-4 text-right text-xs tabular-nums text-muted-foreground"
+              id="travel-image-length"
+            >
+              {travelImageLength}/{TRAVEL_IMAGE_MAX_LENGTH}
+            </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">
                 入力例
@@ -622,7 +651,7 @@ export default function Home() {
           >
             <img alt="tabiBit." className="h-10 w-auto" src="/logo-title.png" />
           </button>
-          <h1 className="max-w-3xl text-3xl font-bold tracking-normal text-balance md:text-5xl font-[family-name:var(--font-rounded)]">
+          <h1 className="max-w-3xl break-words text-3xl font-bold tracking-normal text-balance [overflow-wrap:anywhere] md:text-5xl font-[family-name:var(--font-rounded)]">
             {feedInput.travelImage}
           </h1>
           <div className="mt-4 flex flex-wrap items-center gap-2">

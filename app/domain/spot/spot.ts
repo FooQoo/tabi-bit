@@ -4,6 +4,7 @@ export const SPOT_BATCH_SIZE = 10;
 export const SPOT_PREFETCH_THRESHOLD = 3;
 export const MAX_SPOTS_PER_SESSION = 100;
 export const SPOT_GENERATION_MODEL = "gemini-3.5-flash";
+export const TRAVEL_IMAGE_MAX_LENGTH = 80;
 
 export const spotCategories = [
   "nature",
@@ -76,7 +77,7 @@ export const spotSchema = z.object({
 });
 
 export const generateSpotsRequestSchema = z.object({
-  travelImage: z.string().trim().min(1).max(300),
+  travelImage: z.string().trim().min(1).max(TRAVEL_IMAGE_MAX_LENGTH),
   prefecture: z.object({
     code: z.string().min(1),
     label: z.string().min(1),
