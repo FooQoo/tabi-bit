@@ -45,14 +45,16 @@ import {
 } from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
 import { cn } from "~/lib/utils";
-import { prefectures, type Prefecture } from "~/lib/prefectures";
+import { prefectures, type Prefecture } from "~/domain/prefecture/prefecture";
 import {
   type GeneratedSpot,
   MAX_SPOTS_PER_SESSION,
   SPOT_BATCH_SIZE,
   type SpotCategory,
   spotCategoryLabels,
-} from "~/lib/spot-model";
+} from "~/domain/spot/spot";
+import type { OptimizedPlan } from "~/domain/plan/plan";
+import { optimizePlan } from "~/domain/plan/optimize-plan";
 
 // --- Session storage ---
 const SESSION_KEY_PREFIX = "tabi-bit:session:";
@@ -156,35 +158,6 @@ type FeedEvent =
 type FeedInput = {
   travelImage: string;
   prefecture: Prefecture;
-};
-
-type OptimizedPlan = {
-  spots: GeneratedSpot[];
-  travelLegs: TravelLeg[];
-  totalStayMinutes: number;
-  totalTravelMinutes: number;
-  totalDurationMinutes: number;
-  totalBudgetYen: { min: number; max: number };
-  averageDetourLevel: number;
-  categoryCount: number;
-  durationExceeded: boolean;
-  budgetExceeded: boolean;
-  pinnedSpotIds: Set<string>;
-};
-
-type TravelMode = "walk" | "train" | "car";
-
-type TravelLeg = {
-  fromSpotId: string;
-  toSpotId: string;
-  distanceKm: number;
-  minutes: number;
-  mode: TravelMode;
-};
-
-type PlanConstraints = {
-  maxDurationMinutes?: number;
-  maxBudgetYen?: number;
 };
 
 export function meta({}: Route.MetaArgs) {
@@ -698,228 +671,6 @@ function parseNonNegativeInteger(value: string) {
   return Number.isFinite(parsedValue) && parsedValue >= 0
     ? parsedValue
     : undefined;
-}
-
-function optimizePlan(
-  spots: GeneratedSpot[],
-  constraints: PlanConstraints,
-  pinnedSpotIds: Set<string>,
-  blacklistedSpotIds: Set<string>,
-): OptimizedPlan {
-  const eligibleSpots = spots.filter((s) => !blacklistedSpotIds.has(s.id));
-  const pinnedSpots = eligibleSpots.filter((s) => pinnedSpotIds.has(s.id));
-  const unpinnedSpots = eligibleSpots.filter((s) => !pinnedSpotIds.has(s.id));
-
-  const selectedSpots: GeneratedSpot[] = [...pinnedSpots];
-  const usedCategories = new Set<string>(pinnedSpots.map((s) => s.category));
-  const usedMunicipalities = new Set<string>(
-    pinnedSpots.map((s) => s.municipality ?? s.name),
-  );
-
-  // 残りスロットをスコア順に非ピンスポットで埋める
-  const scoredUnpinned = unpinnedSpots
-    .map((spot) => {
-      const budgetMidpoint = (spot.budgetYen.min + spot.budgetYen.max) / 2;
-      const durationPenalty = Math.max(0, spot.durationMinutes - 90) / 30;
-      const budgetPenalty = budgetMidpoint / 3000;
-      const detourBonus = spot.detourLevel * 12;
-      const compactBonus =
-        spot.durationMinutes >= 20 && spot.durationMinutes <= 90 ? 8 : 0;
-      return {
-        spot,
-        score: detourBonus + compactBonus - durationPenalty - budgetPenalty,
-      };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  while (selectedSpots.length < 5) {
-    const nextEntry = scoredUnpinned
-      .filter(
-        ({ spot }) =>
-          !selectedSpots.some((s) => s.id === spot.id) &&
-          canAddSpot(selectedSpots, spot, constraints),
-      )
-      .map(({ score, spot }) => {
-        const previousSpot = selectedSpots.at(-1);
-        const travelMinutes = previousSpot
-          ? estimateTravel(previousSpot, spot).minutes
-          : 0;
-        const municipalityKey = spot.municipality ?? spot.name;
-        const hasEnoughVariety = selectedSpots.length >= 3;
-        const varietyPenalty =
-          !hasEnoughVariety &&
-          (usedCategories.has(spot.category) ||
-            usedMunicipalities.has(municipalityKey))
-            ? 18
-            : 0;
-        return { score: score - travelMinutes * 0.7 - varietyPenalty, spot };
-      })
-      .sort((a, b) => b.score - a.score)[0];
-
-    if (!nextEntry) break;
-
-    const { spot } = nextEntry;
-    const municipalityKey = spot.municipality ?? spot.name;
-    selectedSpots.push(spot);
-    usedCategories.add(spot.category);
-    usedMunicipalities.add(municipalityKey);
-  }
-
-  const travelLegs = buildTravelLegs(selectedSpots);
-  const totalStayMinutes = selectedSpots.reduce(
-    (total, spot) => total + spot.durationMinutes,
-    0,
-  );
-  const totalTravelMinutes = travelLegs.reduce(
-    (total, leg) => total + leg.minutes,
-    0,
-  );
-  const totalDurationMinutes = totalStayMinutes + totalTravelMinutes;
-  const totalBudgetMax = selectedSpots.reduce(
-    (total, spot) => total + spot.budgetYen.max,
-    0,
-  );
-
-  return {
-    spots: selectedSpots,
-    travelLegs,
-    totalStayMinutes,
-    totalTravelMinutes,
-    totalDurationMinutes,
-    totalBudgetYen: selectedSpots.reduce(
-      (total, spot) => ({
-        min: total.min + spot.budgetYen.min,
-        max: total.max + spot.budgetYen.max,
-      }),
-      { min: 0, max: 0 },
-    ),
-    averageDetourLevel:
-      selectedSpots.length === 0
-        ? 0
-        : selectedSpots.reduce((total, spot) => total + spot.detourLevel, 0) /
-          selectedSpots.length,
-    categoryCount: new Set(selectedSpots.map((spot) => spot.category)).size,
-    durationExceeded:
-      constraints.maxDurationMinutes !== undefined &&
-      totalDurationMinutes > constraints.maxDurationMinutes,
-    budgetExceeded:
-      constraints.maxBudgetYen !== undefined &&
-      totalBudgetMax > constraints.maxBudgetYen,
-    pinnedSpotIds,
-  };
-}
-
-function canAddSpot(
-  selectedSpots: GeneratedSpot[],
-  nextSpot: GeneratedSpot,
-  constraints: PlanConstraints,
-) {
-  const travelMinutes =
-    selectedSpots.length === 0
-      ? 0
-      : estimateTravel(selectedSpots[selectedSpots.length - 1], nextSpot)
-          .minutes;
-  const nextDuration =
-    selectedSpots.reduce((total, spot) => total + spot.durationMinutes, 0) +
-    buildTravelLegs(selectedSpots).reduce(
-      (total, leg) => total + leg.minutes,
-      0,
-    ) +
-    nextSpot.durationMinutes +
-    travelMinutes;
-  const nextBudget =
-    selectedSpots.reduce((total, spot) => total + spot.budgetYen.max, 0) +
-    nextSpot.budgetYen.max;
-
-  if (
-    constraints.maxDurationMinutes !== undefined &&
-    nextDuration > constraints.maxDurationMinutes
-  ) {
-    return false;
-  }
-
-  if (
-    constraints.maxBudgetYen !== undefined &&
-    nextBudget > constraints.maxBudgetYen
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function buildTravelLegs(spots: GeneratedSpot[]) {
-  return spots.slice(1).map((spot, index) => {
-    const previousSpot = spots[index];
-    return estimateTravel(previousSpot, spot);
-  });
-}
-
-function estimateTravel(
-  fromSpot: GeneratedSpot,
-  toSpot: GeneratedSpot,
-): TravelLeg {
-  const distanceKm = calculateDistanceKm(fromSpot, toSpot);
-  const isTokyo = fromSpot.prefecture === "東京都";
-
-  let minutes: number;
-  let mode: TravelMode;
-
-  if (isTokyo) {
-    if (distanceKm <= 1.0) {
-      // 徒歩: 4.5 km/h、道のり係数 1.2
-      mode = "walk";
-      minutes = Math.max(5, Math.ceil(((distanceKm * 1.2) / 4.5) * 60));
-    } else {
-      // 電車: 駅までの歩き + 待ち時間の固定オーバーヘッド 10分
-      // 実効速度 30 km/h（停車・乗り換え込み）、道のり係数 1.3
-      mode = "train";
-      minutes = Math.max(12, 10 + Math.ceil(((distanceKm * 1.3) / 30) * 60));
-    }
-  } else {
-    // 車: 固定オーバーヘッド 5分（乗降・駐車）+ 距離に応じた速度
-    // 短距離: 25 km/h（生活道路）/ 中距離: 40 km/h（幹線道路）/ 長距離: 60 km/h（幹線〜高速）
-    mode = "car";
-    const routeKm = distanceKm * 1.3;
-    const travelMin =
-      distanceKm <= 3
-        ? Math.ceil((routeKm / 25) * 60)
-        : distanceKm <= 15
-          ? Math.ceil((routeKm / 40) * 60)
-          : Math.ceil((routeKm / 60) * 60);
-    minutes = Math.max(5, 5 + travelMin);
-  }
-
-  return {
-    fromSpotId: fromSpot.id,
-    toSpotId: toSpot.id,
-    distanceKm,
-    minutes,
-    mode,
-  };
-}
-
-function calculateDistanceKm(fromSpot: GeneratedSpot, toSpot: GeneratedSpot) {
-  const earthRadiusKm = 6371;
-  const fromLatitude = toRadians(fromSpot.latitude);
-  const toLatitude = toRadians(toSpot.latitude);
-  const latitudeDelta = toRadians(toSpot.latitude - fromSpot.latitude);
-  const longitudeDelta = toRadians(toSpot.longitude - fromSpot.longitude);
-  const haversine =
-    Math.sin(latitudeDelta / 2) ** 2 +
-    Math.cos(fromLatitude) *
-      Math.cos(toLatitude) *
-      Math.sin(longitudeDelta / 2) ** 2;
-
-  return (
-    earthRadiusKm *
-    2 *
-    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
-  );
-}
-
-function toRadians(degrees: number) {
-  return (degrees * Math.PI) / 180;
 }
 
 function PlanPanel({

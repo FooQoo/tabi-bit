@@ -9,7 +9,7 @@ import {
   SPOT_GENERATION_MODEL,
   spotCategoryLabels,
   spotSchema,
-} from "~/lib/spot-model";
+} from "~/domain/spot/spot";
 
 type StreamEvent =
   | { type: "spot"; spot: unknown }

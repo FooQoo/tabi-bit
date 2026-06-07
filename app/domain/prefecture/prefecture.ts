@@ -49,4 +49,3 @@ export const prefectures = [
 ] as const;
 
 export type Prefecture = (typeof prefectures)[number];
-
