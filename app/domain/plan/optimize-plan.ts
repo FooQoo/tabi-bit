@@ -109,9 +109,10 @@ export const PLAN_PROFILES: PlanProfile[] = [
     id: "luxury",
     label: "贅沢",
     description: "予算の上限近くまで、少し贅沢なスポットを選びます。",
-    maxSpots: MAX_PLAN_SPOTS,
-    // 予算ペナルティを実質無効化し、代わりに予算額そのものを加点に回す。
-    weights: { budgetPenaltyDivisor: Number.MAX_SAFE_INTEGER, budgetBonusDivisor: 500 },
+    // 件数ではなく予算を上限の制約にしたいので、スロットは多めに用意する。
+    maxSpots: 8,
+    // 予算ペナルティを実質無効化し、代わりに予算額そのものを強く加点に回す。
+    weights: { budgetPenaltyDivisor: Number.MAX_SAFE_INTEGER, budgetBonusDivisor: 100 },
     categoryBoost: {},
   },
 ];
