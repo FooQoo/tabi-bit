@@ -267,6 +267,32 @@ describe("generatePlans", () => {
     expect(luxury.totalBudgetYen.max).toBeGreaterThanOrEqual(24000);
   });
 
+  it("非ピンのプランは所要時間上限を超えない（最終順で超えたら削る）", () => {
+    // 近接した飲食系 2 件＋遠方 1 件。移動最短なら飲食が隣接するが、
+    // 連続回避を優先すると遠方を間に挟んで移動が倍増し、選定時の
+    // 移動上界を超える。最終順で超えた分を削って上限内に収める。
+    const maxDurationMinutes = 320;
+    const spots = [
+      makeSpot({ id: "food", category: "food", durationMinutes: 60, latitude: 35.0, longitude: 139.0 }),
+      makeSpot({ id: "cafe", category: "cafe", durationMinutes: 60, latitude: 35.001, longitude: 139.001 }),
+      makeSpot({ id: "far", category: "nature", durationMinutes: 60, latitude: 35.3, longitude: 139.3 }),
+    ];
+
+    const plans = generatePlans(
+      spots,
+      { maxDurationMinutes },
+      noPins,
+      noBlacklist,
+    );
+
+    for (const { plan } of plans) {
+      expect(plan.totalStayMinutes + plan.totalTravelMinutes).toBeLessThanOrEqual(
+        maxDurationMinutes,
+      );
+      expect(plan.durationExceeded).toBe(false);
+    }
+  });
+
   it("飲食系（食事・カフェ）を連続させない", () => {
     // 同一座標（移動差なし）。間に挟める非飲食スポットを十分用意する。
     const food = makeSpot({ id: "food", category: "food" });
