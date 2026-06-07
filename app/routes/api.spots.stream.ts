@@ -62,11 +62,10 @@ ${categories}
 - ${count}件のうち半数以上は、旅の主目的ではないが立ち寄ると気分が変わるスポットにする。
 - detourLevel は 1=目的地向き、2=寄り道向き、3=かなり寄り道感が強い、で評価する。
 - detourLevel が3のスポットを少なくとも2件含める。
-- detourAppeal は「なぜ寄り道として面白いか」を60文字以内で具体的に書く。
 - latitude / longitude はその実在スポットのおおよその座標にする。
 - budgetYen は1人あたりの目安。無料の場合は min/max ともに0にする。
-- description は80文字以内で、旅のイメージとの相性が分かる内容にする。
-- highlights は2から4件にする。
+- description は50文字以内で、旅のイメージとの相性が分かる内容にする。
+- highlights は2件にする。
 - 日本語は自然で読みやすく、誤字・脱字・不自然な造語を含めない。
 - country は必ず "Japan" にする。
 - prefecture は必ず "${prefecture.label}" にする。
@@ -123,6 +122,13 @@ export async function action({ request }: Route.ActionArgs) {
           output: Output.array({ element: spotSchema }),
           prompt: buildPrompt({ ...parsed.data, count }),
           temperature: 0.9,
+          providerOptions: {
+            google: {
+              thinkingConfig: {
+                thinkingLevel: "minimal",
+              },
+            },
+          },
         });
 
         for await (const spot of elementStream) {

@@ -21,6 +21,7 @@ body {
 
 @theme inline {
   --font-heading: var(--font-sans);
+  --font-rounded: "M PLUS Rounded 1c", ui-rounded, sans-serif;
   --font-sans: 'Geist Variable', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
