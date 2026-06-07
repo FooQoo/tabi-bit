@@ -11,16 +11,19 @@ import {
   Armchair,
   Ban,
   Bike,
+  Car,
   ChevronLeft,
   ChevronRight,
   Coffee,
   Compass,
+  Footprints,
   Landmark,
   type LucideIcon,
   Mountain,
   Palette,
   Pin,
   ShoppingBag,
+  TrainFront,
   Trees,
   Utensils,
 } from "lucide-react";
@@ -878,103 +881,149 @@ function PlanPanel({
               </p>
             )}
 
-            <ol className="space-y-3">
+            <ol className="space-y-0">
               {plan.spots.map((spot, index) => {
                 const isPinned = plan.pinnedSpotIds.has(spot.id);
                 const stop = plan.scheduledStops[index];
+                const leg = index > 0 ? plan.travelLegs[index - 1] : null;
+                const ModeIcon =
+                  leg?.mode === "walk"
+                    ? Footprints
+                    : leg?.mode === "train"
+                      ? TrainFront
+                      : Car;
+                const modeLabel =
+                  leg?.mode === "walk"
+                    ? "徒歩"
+                    : leg?.mode === "train"
+                      ? "電車"
+                      : "車";
                 return (
-                  <li
-                    className={cn(
-                      "cursor-pointer rounded-lg border bg-background/60 p-3 transition-colors hover:bg-muted/60",
-                      isPinned && "border-primary/40 bg-primary/5 hover:bg-primary/10",
+                  <li key={spot.id}>
+                    {leg && (
+                      <div className="flex items-stretch gap-3">
+                        <div className="flex w-7 shrink-0 flex-col items-center">
+                          <span className="w-0.5 flex-1 bg-border/70" />
+                          <span className="flex size-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground">
+                            <ModeIcon className="size-3" />
+                          </span>
+                          <span className="w-0.5 flex-1 bg-border/70" />
+                        </div>
+                        <div className="flex flex-1 items-center gap-1.5 py-2 text-xs text-muted-foreground">
+                          <span className="font-medium">
+                            {modeLabel}で約{leg.minutes}分
+                          </span>
+                          <span className="opacity-60">
+                            ({leg.distanceKm.toFixed(1)}km)
+                          </span>
+                        </div>
+                      </div>
                     )}
-                    key={spot.id}
-                    onClick={() => onSpotClick(spot.id)}
-                  >
-                    {index > 0 &&
-                      (() => {
-                        const leg = plan.travelLegs[index - 1];
-                        const modeLabel =
-                          leg?.mode === "walk"
-                            ? "徒歩"
-                            : leg?.mode === "train"
-                              ? "電車"
-                              : "車";
-                        return (
-                          <div className="mb-3 rounded-md border border-dashed bg-muted/70 px-3 py-2 text-xs text-muted-foreground">
-                            {modeLabel}で約{leg?.minutes ?? 0}分
-                            <span className="ml-1 opacity-60">
-                              ({(leg?.distanceKm ?? 0).toFixed(1)}km)
-                            </span>
-                          </div>
-                        );
-                      })()}
-                    <div className="flex items-start gap-3">
-                      <SpotThumbnail spot={spot} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <div className="flex min-w-0 items-center gap-1">
-                            <button
-                              aria-label={isPinned ? "ピン留め解除" : "プランに固定"}
-                              className={cn(
-                                "shrink-0 rounded p-0.5 transition-colors",
-                                isPinned
-                                  ? "text-primary"
-                                  : "text-muted-foreground/50 hover:text-muted-foreground",
-                              )}
-                              onClick={(e) => { e.stopPropagation(); onTogglePin(spot.id); }}
-                              type="button"
-                            >
-                              <Pin className={cn("size-3", isPinned && "fill-primary")} />
-                            </button>
-                            <p className="truncate text-sm font-medium leading-5">
-                              {index + 1}. {spot.name}
+                    <div className="flex gap-3">
+                      <div className="flex w-7 shrink-0 justify-center pt-1">
+                        <span
+                          className={cn(
+                            "flex size-7 items-center justify-center rounded-full border text-xs font-semibold tabular-nums",
+                            isPinned
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-background text-muted-foreground",
+                          )}
+                        >
+                          {index + 1}
+                        </span>
+                      </div>
+                      <div
+                        className={cn(
+                          "min-w-0 flex-1 cursor-pointer rounded-lg border bg-background/60 p-3 transition-colors hover:bg-muted/60",
+                          isPinned &&
+                            "border-primary/40 bg-primary/5 hover:bg-primary/10",
+                        )}
+                        onClick={() => onSpotClick(spot.id)}
+                      >
+                        <div className="flex items-start gap-3">
+                          <SpotThumbnail spot={spot} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <div className="flex min-w-0 items-center gap-1">
+                                <button
+                                  aria-label={
+                                    isPinned ? "ピン留め解除" : "プランに固定"
+                                  }
+                                  className={cn(
+                                    "shrink-0 rounded p-0.5 transition-colors",
+                                    isPinned
+                                      ? "text-primary"
+                                      : "text-muted-foreground/50 hover:text-muted-foreground",
+                                  )}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTogglePin(spot.id);
+                                  }}
+                                  type="button"
+                                >
+                                  <Pin
+                                    className={cn(
+                                      "size-3",
+                                      isPinned && "fill-primary",
+                                    )}
+                                  />
+                                </button>
+                                <p className="truncate text-sm font-medium leading-5">
+                                  {spot.name}
+                                </p>
+                              </div>
+                              <Badge className="shrink-0" variant="outline">
+                                寄り道 {spot.detourLevel}
+                              </Badge>
+                            </div>
+                            {stop && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                                <span
+                                  className={cn(
+                                    "font-medium tabular-nums",
+                                    stop.closedConflict
+                                      ? "text-destructive"
+                                      : "text-foreground/80",
+                                  )}
+                                >
+                                  {formatClock(stop.arrivalMinutes)}–
+                                  {formatClock(stop.departureMinutes)}
+                                </span>
+                                {spot.idealTimeOfDay &&
+                                  spot.idealTimeOfDay !== "anytime" && (
+                                    <span className="text-muted-foreground">
+                                      {timeOfDayLabels[spot.idealTimeOfDay]}向き
+                                    </span>
+                                  )}
+                                {stop.waitMinutes > 0 && (
+                                  <span className="text-amber-600">
+                                    開店待ち{stop.waitMinutes}分
+                                  </span>
+                                )}
+                                {stop.closedConflict && (
+                                  <span className="text-destructive">
+                                    営業時間外
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                              {spot.description}
                             </p>
                           </div>
-                          <Badge className="shrink-0" variant="outline">寄り道 {spot.detourLevel}</Badge>
                         </div>
-                        {stop && (
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                            <span
-                              className={cn(
-                                "font-medium tabular-nums",
-                                stop.closedConflict
-                                  ? "text-destructive"
-                                  : "text-foreground/80",
-                              )}
-                            >
-                              {formatClock(stop.arrivalMinutes)}–
-                              {formatClock(stop.departureMinutes)}
-                            </span>
-                            {spot.idealTimeOfDay &&
-                              spot.idealTimeOfDay !== "anytime" && (
-                                <span className="text-muted-foreground">
-                                  {timeOfDayLabels[spot.idealTimeOfDay]}向き
-                                </span>
-                              )}
-                            {stop.waitMinutes > 0 && (
-                              <span className="text-amber-600">
-                                開店待ち{stop.waitMinutes}分
-                              </span>
-                            )}
-                            {stop.closedConflict && (
-                              <span className="text-destructive">営業時間外</span>
-                            )}
-                          </div>
-                        )}
-                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                          {spot.description}
-                        </p>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          <Badge variant="secondary">
+                            {spotCategoryLabels[spot.category]}
+                          </Badge>
+                          <Badge variant="outline">
+                            {spot.durationMinutes}分
+                          </Badge>
+                          {spot.municipality && (
+                            <Badge variant="outline">{spot.municipality}</Badge>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      <Badge variant="secondary">
-                        {spotCategoryLabels[spot.category]}
-                      </Badge>
-                      <Badge variant="outline">{spot.durationMinutes}分</Badge>
-                      {spot.municipality && (
-                        <Badge variant="outline">{spot.municipality}</Badge>
-                      )}
                     </div>
                   </li>
                 );
