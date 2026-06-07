@@ -1,0 +1,85 @@
+const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
+
+/**
+ * Google Places API の認証キー。Places 用が無ければ Maps 用にフォールバックする。
+ */
+export function getPlacesApiKey(): string | undefined {
+  return process.env.GOOGLE_PLACES_API_KEY ?? process.env.GOOGLE_MAPS_API_KEY;
+}
+
+/**
+ * テキスト検索で先頭の場所を引き、その写真リソース名を返す。
+ * - 検索が HTTP エラーのときは null（呼び出し側で短期キャッシュ等に振り分ける）。
+ * - 検索成功だが写真が無いときは空配列。
+ * - ネットワーク例外はそのまま伝播する。
+ */
+export async function searchPlacePhotoNames(
+  textQuery: string,
+  apiKey: string,
+  maxPhotos: number,
+): Promise<string[] | null> {
+  const response = await fetch(SEARCH_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": "places.photos",
+    },
+    body: JSON.stringify({
+      textQuery,
+      languageCode: "ja",
+      regionCode: "JP",
+      maxResultCount: 1,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    console.error(
+      `[places/photo] searchText failed (${response.status}):`,
+      body,
+    );
+    return null;
+  }
+
+  const data = (await response.json()) as {
+    places?: Array<{ photos?: Array<{ name: string }> }>;
+  };
+
+  const photos = data.places?.[0]?.photos?.slice(0, maxPhotos) ?? [];
+  return photos.map((photo) => photo.name);
+}
+
+/**
+ * 写真リソース名から実際の画像 URI を取得する。失敗時は null。
+ */
+export async function fetchPhotoMediaUri(
+  photoName: string,
+  apiKey: string,
+): Promise<string | null> {
+  const mediaUrl = new URL(
+    `https://places.googleapis.com/v1/${photoName}/media`,
+  );
+  mediaUrl.searchParams.set("maxWidthPx", "800");
+  mediaUrl.searchParams.set("maxHeightPx", "600");
+  mediaUrl.searchParams.set("skipHttpRedirect", "true");
+
+  try {
+    const response = await fetch(mediaUrl, {
+      headers: { "X-Goog-Api-Key": apiKey },
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.error(
+        `[places/photo] media fetch failed (${response.status}):`,
+        body,
+      );
+      return null;
+    }
+    const data = (await response.json()) as { photoUri?: string };
+    return data.photoUri ?? null;
+  } catch (error) {
+    console.error("[places/photo] media fetch error:", error);
+    return null;
+  }
+}
