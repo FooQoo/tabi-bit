@@ -11,6 +11,7 @@ import {
 } from "~/domain/plan/schedule";
 import {
   buildTravelLegs,
+  calculateDistanceKm,
   estimateTravel,
   routeTravelMinutes,
 } from "~/domain/plan/travel";
@@ -58,6 +59,12 @@ const SCHEDULE_PENALTY = {
 
 /** 連続を避けたい飲食系カテゴリ。 */
 const MEAL_CATEGORIES = new Set<SpotCategory>(["food", "cafe"]);
+
+/**
+ * 飲食系（食事・カフェ）同士は近すぎる組み合わせを避ける。
+ * これより近い距離（km）にある飲食系スポットは同じプランに採用しない。
+ */
+const MEAL_MIN_SEPARATION_KM = 1;
 
 type PlanWeights = Record<keyof typeof WEIGHTS, number>;
 type CategoryBoost = Partial<Record<SpotCategory, number>>;
@@ -388,6 +395,16 @@ function fitsConstraints(
   constraints: PlanConstraints,
 ): boolean {
   const tentative = [...selectedSpots, candidate];
+
+  // 飲食系（食事・カフェ）同士が近すぎる組み合わせは採用しない。
+  if (MEAL_CATEGORIES.has(candidate.category)) {
+    const tooCloseMeal = selectedSpots.some(
+      (spot) =>
+        MEAL_CATEGORIES.has(spot.category) &&
+        calculateDistanceKm(spot, candidate) < MEAL_MIN_SEPARATION_KM,
+    );
+    if (tooCloseMeal) return false;
+  }
 
   if (constraints.maxBudgetYen !== undefined) {
     if (sumBudgetMax(tentative) > constraints.maxBudgetYen) return false;

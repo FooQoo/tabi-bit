@@ -5,7 +5,7 @@ import {
   optimizePlan,
   PLAN_PROFILES,
 } from "~/domain/plan/optimize-plan";
-import { routeTravelMinutes } from "~/domain/plan/travel";
+import { calculateDistanceKm, routeTravelMinutes } from "~/domain/plan/travel";
 import { makeSpot } from "~/domain/plan/__fixtures__/spot";
 
 const noConstraints = {};
@@ -222,12 +222,19 @@ describe("generatePlans", () => {
   });
 
   it("食重視は食事・カフェを優先する", () => {
-    // 同一座標（移動差なし）。寄り道で勝る自然と、食重視の加点で勝る食事。
+    // 寄り道で勝る自然と、食重視の加点で勝る食事。
+    // 飲食系は 1km 以上離す制約があるため、食事は十分に離して配置する
+    // （緯度 0.02 ≒ 2.2km）。
     const nature = Array.from({ length: 3 }, (_, i) =>
       makeSpot({ id: `n${i}`, category: "nature", detourLevel: 2 }),
     );
     const food = Array.from({ length: 6 }, (_, i) =>
-      makeSpot({ id: `f${i}`, category: "food", detourLevel: 1 }),
+      makeSpot({
+        id: `f${i}`,
+        category: "food",
+        detourLevel: 1,
+        latitude: 35 + i * 0.02,
+      }),
     );
     const spots = [...nature, ...food];
 
@@ -311,6 +318,37 @@ describe("generatePlans", () => {
         const consecutiveMeal =
           isMeal(plan.spots[i].category) && isMeal(plan.spots[i - 1].category);
         expect(consecutiveMeal).toBe(false);
+      }
+    }
+  });
+
+  it("飲食系（食事・カフェ）同士は 1km 以上離す", () => {
+    // 食事 2 件・カフェ 2 件を 1km 未満の至近距離に密集させ、ほかは離す。
+    // 制約がなければ食重視は密集した飲食系を複数採用してしまう。
+    const closeMeals = [
+      makeSpot({ id: "food-a", category: "food", latitude: 35.0, longitude: 139.0 }),
+      makeSpot({ id: "food-b", category: "food", latitude: 35.002, longitude: 139.002 }),
+      makeSpot({ id: "cafe-a", category: "cafe", latitude: 35.001, longitude: 139.001 }),
+      makeSpot({ id: "cafe-b", category: "cafe", latitude: 35.003, longitude: 139.0 }),
+    ];
+    // 間を埋める非飲食スポット。
+    const nature = Array.from({ length: 6 }, (_, i) =>
+      makeSpot({ id: `n${i}`, category: "nature", latitude: 35.1 + i * 0.02 }),
+    );
+    const spots = [...closeMeals, ...nature];
+
+    const plans = generatePlans(spots, {}, noPins, noBlacklist);
+    const isMeal = (category: string) =>
+      category === "food" || category === "cafe";
+
+    for (const { plan } of plans) {
+      const meals = plan.spots.filter((s) => isMeal(s.category));
+      for (let i = 0; i < meals.length; i += 1) {
+        for (let j = i + 1; j < meals.length; j += 1) {
+          expect(calculateDistanceKm(meals[i], meals[j])).toBeGreaterThanOrEqual(
+            1,
+          );
+        }
       }
     }
   });
