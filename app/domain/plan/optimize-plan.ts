@@ -1,4 +1,4 @@
-import type { GeneratedSpot } from "~/domain/spot/spot";
+import type { GeneratedSpot, SpotCategory } from "~/domain/spot/spot";
 import type { OptimizedPlan, PlanConstraints } from "~/domain/plan/plan";
 import { orderSpotsByRoute } from "~/domain/plan/route-order";
 import {
@@ -12,13 +12,13 @@ import {
   routeTravelMinutes,
 } from "~/domain/plan/travel";
 
-/** プランに含めるスポットの上限。 */
+/** プランに含めるスポットの既定上限。 */
 const MAX_PLAN_SPOTS = 5;
 
 /** この件数に達するまでは多様性（カテゴリ・地域の重複）を抑制する。 */
 const VARIETY_LOOKAHEAD = 3;
 
-/** スコアリングの重み。値を一箇所に集約して調整しやすくする。 */
+/** スコアリングの重み（バランス案の既定値）。 */
 const WEIGHTS = {
   /** 寄り道度 1 段階あたりの加点。 */
   detourBonusPerLevel: 12,
@@ -45,12 +45,91 @@ const SCHEDULE_PENALTY = {
   closedConflict: 600,
 } as const;
 
+type PlanWeights = Record<keyof typeof WEIGHTS, number>;
+type CategoryBoost = Partial<Record<SpotCategory, number>>;
+
+/** プランの性格を決めるプロファイル。重み・上限・カテゴリ加点を切り替える。 */
+export type PlanProfile = {
+  id: string;
+  label: string;
+  description: string;
+  /** スポット数の上限。 */
+  maxSpots: number;
+  /** 既定の重みへの部分上書き。 */
+  weights: Partial<PlanWeights>;
+  /** カテゴリごとの加点。 */
+  categoryBoost: CategoryBoost;
+};
+
+/** 提案する複数プランのプロファイル一覧。 */
+export const PLAN_PROFILES: PlanProfile[] = [
+  {
+    id: "balanced",
+    label: "バランス",
+    description: "寄り道度・時間・予算・分散をならして選びます。",
+    maxSpots: MAX_PLAN_SPOTS,
+    weights: {},
+    categoryBoost: {},
+  },
+  {
+    id: "relaxed",
+    label: "ゆったり",
+    description: "件数を絞り、移動が少なく落ち着けるスポット中心に。",
+    maxSpots: 3,
+    weights: { travelPenaltyPerMinute: 1.4, compactBonus: 14 },
+    categoryBoost: { relax: 10, cafe: 8, view: 6 },
+  },
+  {
+    id: "packed",
+    label: "詰め込み",
+    description: "移動を許容して、できるだけ多くのスポットを回ります。",
+    maxSpots: 7,
+    weights: { travelPenaltyPerMinute: 0.35 },
+    categoryBoost: { activity: 6 },
+  },
+  {
+    id: "foodie",
+    label: "食重視",
+    description: "食事とカフェを優先して組み立てます。",
+    maxSpots: MAX_PLAN_SPOTS,
+    weights: {},
+    categoryBoost: { food: 20, cafe: 14 },
+  },
+];
+
+/**
+ * 各プロファイルでプランを生成して返す。
+ * ピン留め・ブラックリストはどのプランにも共通で効く。
+ */
+export function generatePlans(
+  spots: GeneratedSpot[],
+  constraints: PlanConstraints,
+  pinnedSpotIds: Set<string>,
+  blacklistedSpotIds: Set<string>,
+): Array<{ profile: PlanProfile; plan: OptimizedPlan }> {
+  return PLAN_PROFILES.map((profile) => ({
+    profile,
+    plan: optimizePlan(
+      spots,
+      constraints,
+      pinnedSpotIds,
+      blacklistedSpotIds,
+      profile,
+    ),
+  }));
+}
+
 export function optimizePlan(
   spots: GeneratedSpot[],
   constraints: PlanConstraints,
   pinnedSpotIds: Set<string>,
   blacklistedSpotIds: Set<string>,
+  profile?: PlanProfile,
 ): OptimizedPlan {
+  const weights: PlanWeights = { ...WEIGHTS, ...profile?.weights };
+  const categoryBoost: CategoryBoost = profile?.categoryBoost ?? {};
+  const maxSpots = profile?.maxSpots ?? MAX_PLAN_SPOTS;
+
   const eligibleSpots = spots.filter((s) => !blacklistedSpotIds.has(s.id));
   const pinnedSpots = eligibleSpots.filter((s) => pinnedSpotIds.has(s.id));
   const unpinnedSpots = eligibleSpots.filter((s) => !pinnedSpotIds.has(s.id));
@@ -64,16 +143,17 @@ export function optimizePlan(
 
   // 残りスロットを静的スコア順の非ピンスポットで埋める。
   const scoredUnpinned = unpinnedSpots
-    .map((spot) => ({ spot, score: staticScore(spot) }))
+    .map((spot) => ({ spot, score: staticScore(spot, weights, categoryBoost) }))
     .sort((a, b) => b.score - a.score);
 
-  while (selectedSpots.length < MAX_PLAN_SPOTS) {
+  while (selectedSpots.length < maxSpots) {
     const nextSpot = pickNextSpot(
       selectedSpots,
       scoredUnpinned,
       usedCategories,
       usedMunicipalities,
       constraints,
+      weights,
     );
 
     if (!nextSpot) break;
@@ -150,6 +230,7 @@ function pickNextSpot(
   usedCategories: Set<string>,
   usedMunicipalities: Set<string>,
   constraints: PlanConstraints,
+  weights: PlanWeights,
 ): GeneratedSpot | null {
   let best: { spot: GeneratedSpot; score: number } | null = null;
 
@@ -163,10 +244,10 @@ function pickNextSpot(
       usedCategories.has(spot.category) ||
       usedMunicipalities.has(municipalityKeyOf(spot));
     const varietyPenalty =
-      !hasEnoughVariety && isDuplicate ? WEIGHTS.varietyPenalty : 0;
+      !hasEnoughVariety && isDuplicate ? weights.varietyPenalty : 0;
 
     const adjustedScore =
-      score - travelMinutes * WEIGHTS.travelPenaltyPerMinute - varietyPenalty;
+      score - travelMinutes * weights.travelPenaltyPerMinute - varietyPenalty;
 
     if (!best || adjustedScore > best.score) {
       best = { spot, score: adjustedScore };
@@ -198,19 +279,24 @@ function scheduleCost(orderedSpots: GeneratedSpot[], startMinutes: number): numb
   return cost;
 }
 
-function staticScore(spot: GeneratedSpot): number {
+function staticScore(
+  spot: GeneratedSpot,
+  weights: PlanWeights,
+  categoryBoost: CategoryBoost,
+): number {
   const budgetMidpoint = (spot.budgetYen.min + spot.budgetYen.max) / 2;
   const durationPenalty =
-    Math.max(0, spot.durationMinutes - WEIGHTS.durationSoftCapMinutes) /
-    WEIGHTS.durationPenaltyStepMinutes;
-  const budgetPenalty = budgetMidpoint / WEIGHTS.budgetPenaltyDivisor;
-  const detourBonus = spot.detourLevel * WEIGHTS.detourBonusPerLevel;
+    Math.max(0, spot.durationMinutes - weights.durationSoftCapMinutes) /
+    weights.durationPenaltyStepMinutes;
+  const budgetPenalty = budgetMidpoint / weights.budgetPenaltyDivisor;
+  const detourBonus = spot.detourLevel * weights.detourBonusPerLevel;
   const compactBonus =
-    spot.durationMinutes >= WEIGHTS.compactMinMinutes &&
-    spot.durationMinutes <= WEIGHTS.compactMaxMinutes
-      ? WEIGHTS.compactBonus
+    spot.durationMinutes >= weights.compactMinMinutes &&
+    spot.durationMinutes <= weights.compactMaxMinutes
+      ? weights.compactBonus
       : 0;
-  return detourBonus + compactBonus - durationPenalty - budgetPenalty;
+  const boost = categoryBoost[spot.category] ?? 0;
+  return detourBonus + compactBonus + boost - durationPenalty - budgetPenalty;
 }
 
 /** 候補と既選択クラスタとの近さ（最寄りスポットへの移動分）。順序に依存しない。 */

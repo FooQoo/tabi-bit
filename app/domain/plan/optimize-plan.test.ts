@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { optimizePlan } from "~/domain/plan/optimize-plan";
+import {
+  generatePlans,
+  optimizePlan,
+  PLAN_PROFILES,
+} from "~/domain/plan/optimize-plan";
 import { routeTravelMinutes } from "~/domain/plan/travel";
 import { makeSpot } from "~/domain/plan/__fixtures__/spot";
 
@@ -169,5 +173,50 @@ describe("optimizePlan", () => {
     expect(plan.spots).toHaveLength(3);
     expect(plan.durationExceeded).toBe(true);
     expect(plan.budgetExceeded).toBe(true);
+  });
+});
+
+describe("generatePlans", () => {
+  it("プロファイルごとに 1 プランずつ返す", () => {
+    const spots = Array.from({ length: 10 }, (_, i) =>
+      makeSpot({ id: `s${i}`, latitude: 35 + i * 0.02 }),
+    );
+    const plans = generatePlans(spots, {}, noPins, noBlacklist);
+    expect(plans).toHaveLength(PLAN_PROFILES.length);
+    expect(plans.map((p) => p.profile.id)).toEqual(
+      PLAN_PROFILES.map((p) => p.id),
+    );
+  });
+
+  it("ゆったりは件数を絞り、詰め込みは多く回る", () => {
+    const spots = Array.from({ length: 10 }, (_, i) =>
+      makeSpot({ id: `s${i}`, latitude: 35 + i * 0.02 }),
+    );
+    const plans = generatePlans(spots, {}, noPins, noBlacklist);
+    const relaxed = plans.find((p) => p.profile.id === "relaxed")!.plan;
+    const packed = plans.find((p) => p.profile.id === "packed")!.plan;
+
+    expect(relaxed.spots.length).toBeLessThanOrEqual(3);
+    expect(packed.spots.length).toBeGreaterThan(relaxed.spots.length);
+  });
+
+  it("食重視は食事・カフェを優先する", () => {
+    // 同一座標（移動差なし）。寄り道で勝る自然と、食重視の加点で勝る食事。
+    const nature = Array.from({ length: 3 }, (_, i) =>
+      makeSpot({ id: `n${i}`, category: "nature", detourLevel: 2 }),
+    );
+    const food = Array.from({ length: 6 }, (_, i) =>
+      makeSpot({ id: `f${i}`, category: "food", detourLevel: 1 }),
+    );
+    const spots = [...nature, ...food];
+
+    const plans = generatePlans(spots, {}, noPins, noBlacklist);
+    const balanced = plans.find((p) => p.profile.id === "balanced")!.plan;
+    const foodie = plans.find((p) => p.profile.id === "foodie")!.plan;
+
+    const countFood = (plan: typeof balanced) =>
+      plan.spots.filter((s) => s.category === "food").length;
+
+    expect(countFood(foodie)).toBeGreaterThan(countFood(balanced));
   });
 });

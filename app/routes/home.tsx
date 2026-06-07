@@ -55,7 +55,7 @@ import {
   timeOfDayLabels,
 } from "~/domain/spot/spot";
 import type { OptimizedPlan } from "~/domain/plan/plan";
-import { optimizePlan } from "~/domain/plan/optimize-plan";
+import { generatePlans, type PlanProfile } from "~/domain/plan/optimize-plan";
 import { formatClock, parseClock } from "~/domain/plan/schedule";
 
 // --- Session storage ---
@@ -242,10 +242,14 @@ export default function Home() {
   const canSubmit =
     travelImage.trim().length > 0 && Boolean(selectedPrefecture);
   const hasReachedLimit = spots.length >= MAX_SPOTS_PER_SESSION;
-  const optimizedPlan = useMemo(
-    () => optimizePlan(spots, planConstraints, pinnedSpotIds, blacklistedSpotIds),
+  const [selectedProfileId, setSelectedProfileId] = useState("balanced");
+  const plans = useMemo(
+    () => generatePlans(spots, planConstraints, pinnedSpotIds, blacklistedSpotIds),
     [blacklistedSpotIds, planConstraints, pinnedSpotIds, spots],
   );
+  const optimizedPlan =
+    plans.find((p) => p.profile.id === selectedProfileId)?.plan ??
+    plans[0].plan;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -584,10 +588,13 @@ export default function Home() {
           maxDurationMinutes={maxDurationMinutes}
           onMaxBudgetYenChange={setMaxBudgetYen}
           onMaxDurationMinutesChange={setMaxDurationMinutes}
+          onSelectProfile={setSelectedProfileId}
           onSpotClick={scrollToSpot}
           onStartTimeChange={setStartTime}
           onTogglePin={togglePin}
           plan={optimizedPlan}
+          profiles={plans}
+          selectedProfileId={selectedProfileId}
           startTime={startTime}
         />
       </div>
@@ -620,10 +627,13 @@ export default function Home() {
           maxDurationMinutes={maxDurationMinutes}
           onMaxBudgetYenChange={setMaxBudgetYen}
           onMaxDurationMinutesChange={setMaxDurationMinutes}
+          onSelectProfile={setSelectedProfileId}
           onSpotClick={scrollToSpot}
           onStartTimeChange={setStartTime}
           onTogglePin={togglePin}
           plan={optimizedPlan}
+          profiles={plans}
+          selectedProfileId={selectedProfileId}
           startTime={startTime}
         />
       </aside>
@@ -686,22 +696,31 @@ function PlanPanel({
   maxDurationMinutes,
   onMaxBudgetYenChange,
   onMaxDurationMinutesChange,
+  onSelectProfile,
   onSpotClick,
   onStartTimeChange,
   onTogglePin,
   plan,
+  profiles,
+  selectedProfileId,
   startTime,
 }: {
   maxBudgetYen: string;
   maxDurationMinutes: string;
   onMaxBudgetYenChange: (value: string) => void;
   onMaxDurationMinutesChange: (value: string) => void;
+  onSelectProfile: (id: string) => void;
   onSpotClick: (id: string) => void;
   onStartTimeChange: (value: string) => void;
   onTogglePin: (id: string) => void;
   plan: OptimizedPlan;
+  profiles: Array<{ profile: PlanProfile; plan: OptimizedPlan }>;
+  selectedProfileId: string;
   startTime: string;
 }) {
+  const activeProfile =
+    profiles.find((p) => p.profile.id === selectedProfileId)?.profile ??
+    profiles[0]?.profile;
   const budget =
     plan.totalBudgetYen.min === 0 && plan.totalBudgetYen.max === 0
       ? "無料"
@@ -713,12 +732,42 @@ function PlanPanel({
         <Badge className="w-fit" variant="secondary">
           最適化プラン
         </Badge>
-        <CardTitle className="tracking-normal">寄り道バランス案</CardTitle>
+        <CardTitle className="tracking-normal">
+          {activeProfile ? `${activeProfile.label}案` : "プラン案"}
+        </CardTitle>
         <CardDescription>
-          生成済みスポットから、寄り道度・所要時間・予算・カテゴリ分散を見て5件選びます。
+          {activeProfile?.description ??
+            "生成済みスポットから条件に合わせて組み立てます。"}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        <div
+          className="flex flex-wrap gap-1.5"
+          role="tablist"
+          aria-label="プランの方向性"
+        >
+          {profiles.map(({ profile }) => {
+            const isActive = profile.id === selectedProfileId;
+            return (
+              <button
+                aria-selected={isActive}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  isActive
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border/70 bg-background/60 text-muted-foreground hover:bg-muted/60",
+                )}
+                key={profile.id}
+                onClick={() => onSelectProfile(profile.id)}
+                role="tab"
+                type="button"
+              >
+                {profile.label}
+              </button>
+            );
+          })}
+        </div>
+
         <label className="block space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             出発時刻
