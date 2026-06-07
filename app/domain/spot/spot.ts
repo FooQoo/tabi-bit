@@ -31,6 +31,28 @@ export const spotCategoryLabels: Record<SpotCategory, string> = {
   hidden: "穴場",
 };
 
+export const timeOfDayOptions = [
+  "morning",
+  "lunch",
+  "afternoon",
+  "evening",
+  "anytime",
+] as const;
+
+export const timeOfDayLabels: Record<TimeOfDay, string> = {
+  morning: "朝",
+  lunch: "昼",
+  afternoon: "午後",
+  evening: "夕方",
+  anytime: "いつでも",
+};
+
+/** 営業時間（24h の "HH:MM"）。終日営業・不明なら省略する。 */
+export const openingHoursSchema = z.object({
+  open: z.string().regex(/^\d{2}:\d{2}$/),
+  close: z.string().regex(/^\d{2}:\d{2}$/),
+});
+
 export const spotSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -48,6 +70,9 @@ export const spotSchema = z.object({
   country: z.literal("Japan"),
   prefecture: z.string().min(1),
   municipality: z.string().min(1).optional(),
+  // 時間帯フィットと営業時間。旧データ互換のため任意。
+  idealTimeOfDay: z.enum(timeOfDayOptions).optional(),
+  openingHours: openingHoursSchema.optional(),
 });
 
 export const generateSpotsRequestSchema = z.object({
@@ -67,5 +92,7 @@ export const generateSpotsRequestSchema = z.object({
 });
 
 export type SpotCategory = (typeof spotCategories)[number];
+export type TimeOfDay = (typeof timeOfDayOptions)[number];
+export type OpeningHours = z.infer<typeof openingHoursSchema>;
 export type GeneratedSpot = z.infer<typeof spotSchema>;
 export type GenerateSpotsRequest = z.infer<typeof generateSpotsRequestSchema>;

@@ -2,6 +2,7 @@ import {
   MAX_SPOTS_PER_SESSION,
   SPOT_BATCH_SIZE,
   spotCategoryLabels,
+  timeOfDayLabels,
   type GeneratedSpot,
   type GenerateSpotsRequest,
 } from "~/domain/spot/spot";
@@ -21,6 +22,9 @@ function buildPrompt({
   const categories = Object.entries(spotCategoryLabels)
     .map(([key, label]) => `${key}: ${label}`)
     .join("\n");
+  const timeOfDays = Object.entries(timeOfDayLabels)
+    .map(([key, label]) => `${key}: ${label}`)
+    .join("\n");
   const excluded = excludeNames.length > 0 ? excludeNames.join("、") : "なし";
 
   return `あなたは日本旅行に詳しい編集者です。ユーザーの旅のイメージに合う実在スポットを${count}件生成してください。
@@ -38,6 +42,9 @@ ${excluded}
 カテゴリ:
 ${categories}
 
+時間帯（idealTimeOfDay）:
+${timeOfDays}
+
 厳守する条件:
 - ${prefecture.label}内に実在する観光地、店舗、施設、自然スポットのみを返す。
 - 架空の場所、実在風の名称、所在が曖昧な場所は絶対に返さない。
@@ -51,6 +58,8 @@ ${categories}
 - budgetYen は1人あたりの目安。無料の場合は min/max ともに0にする。
 - description は50文字以内で、旅のイメージとの相性が分かる内容にする。
 - highlights は2件にする。
+- idealTimeOfDay は、そのスポットが最も映える時間帯を上記から1つ選ぶ。食事は基本 lunch か evening、カフェは afternoon、眺望や夜景は evening、終日問わない場所は anytime。
+- openingHours は、営業時間が明確な店舗・施設のみ "HH:MM" 形式（24時間表記）で open / close を入れる。公園・屋外・水辺・常時立ち入り可など営業時間の概念がない場所では省略する。推測で曖昧な営業時間を作らない。
 - 日本語は自然で読みやすく、誤字・脱字・不自然な造語を含めない。
 - country は必ず "Japan" にする。
 - prefecture は必ず "${prefecture.label}" にする。

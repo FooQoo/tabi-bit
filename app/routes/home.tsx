@@ -52,9 +52,11 @@ import {
   SPOT_BATCH_SIZE,
   type SpotCategory,
   spotCategoryLabels,
+  timeOfDayLabels,
 } from "~/domain/spot/spot";
 import type { OptimizedPlan } from "~/domain/plan/plan";
 import { optimizePlan } from "~/domain/plan/optimize-plan";
+import { formatClock, parseClock } from "~/domain/plan/schedule";
 
 // --- Session storage ---
 const SESSION_KEY_PREFIX = "tabi-bit:session:";
@@ -176,6 +178,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [maxDurationMinutes, setMaxDurationMinutes] = useState("");
   const [maxBudgetYen, setMaxBudgetYen] = useState("");
+  const [startTime, setStartTime] = useState("10:00");
   const [sessionHistory, setSessionHistory] = useState<SessionEntry[]>([]);
   const [pinnedSpotIds, setPinnedSpotIds] = useState<Set<string>>(new Set());
   const [blacklistedSpotIds, setBlacklistedSpotIds] = useState<Set<string>>(new Set());
@@ -195,8 +198,9 @@ export default function Home() {
     () => ({
       maxDurationMinutes: parsePositiveInteger(maxDurationMinutes),
       maxBudgetYen: parseNonNegativeInteger(maxBudgetYen),
+      startMinutes: parseClock(startTime) ?? undefined,
     }),
-    [maxBudgetYen, maxDurationMinutes],
+    [maxBudgetYen, maxDurationMinutes, startTime],
   );
 
   const togglePin = useCallback((spotId: string) => {
@@ -581,8 +585,10 @@ export default function Home() {
           onMaxBudgetYenChange={setMaxBudgetYen}
           onMaxDurationMinutesChange={setMaxDurationMinutes}
           onSpotClick={scrollToSpot}
+          onStartTimeChange={setStartTime}
           onTogglePin={togglePin}
           plan={optimizedPlan}
+          startTime={startTime}
         />
       </div>
 
@@ -615,8 +621,10 @@ export default function Home() {
           onMaxBudgetYenChange={setMaxBudgetYen}
           onMaxDurationMinutesChange={setMaxDurationMinutes}
           onSpotClick={scrollToSpot}
+          onStartTimeChange={setStartTime}
           onTogglePin={togglePin}
           plan={optimizedPlan}
+          startTime={startTime}
         />
       </aside>
 
@@ -679,16 +687,20 @@ function PlanPanel({
   onMaxBudgetYenChange,
   onMaxDurationMinutesChange,
   onSpotClick,
+  onStartTimeChange,
   onTogglePin,
   plan,
+  startTime,
 }: {
   maxBudgetYen: string;
   maxDurationMinutes: string;
   onMaxBudgetYenChange: (value: string) => void;
   onMaxDurationMinutesChange: (value: string) => void;
   onSpotClick: (id: string) => void;
+  onStartTimeChange: (value: string) => void;
   onTogglePin: (id: string) => void;
   plan: OptimizedPlan;
+  startTime: string;
 }) {
   const budget =
     plan.totalBudgetYen.min === 0 && plan.totalBudgetYen.max === 0
@@ -707,6 +719,17 @@ function PlanPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            出発時刻
+          </span>
+          <Input
+            className="h-10"
+            onChange={(event) => onStartTimeChange(event.target.value)}
+            type="time"
+            value={startTime}
+          />
+        </label>
         <div className="grid grid-cols-2 gap-2">
           <label className="space-y-1.5">
             <span
@@ -778,6 +801,10 @@ function PlanPanel({
           <>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <SummaryMetric
+                label="行程"
+                value={`${formatClock(plan.startMinutes)}〜${formatClock(plan.endMinutes)}`}
+              />
+              <SummaryMetric
                 label="合計時間"
                 value={`${plan.totalDurationMinutes}分`}
               />
@@ -794,15 +821,18 @@ function PlanPanel({
                 label="寄り道度"
                 value={plan.averageDetourLevel.toFixed(1)}
               />
-              <SummaryMetric
-                label="カテゴリ"
-                value={`${plan.categoryCount}種類`}
-              />
             </div>
+
+            {plan.hasClosedConflict && (
+              <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                営業時間外になりそうなスポットがあります。出発時刻を早めるか、対象を外してください。
+              </p>
+            )}
 
             <ol className="space-y-3">
               {plan.spots.map((spot, index) => {
                 const isPinned = plan.pinnedSpotIds.has(spot.id);
+                const stop = plan.scheduledStops[index];
                 return (
                   <li
                     className={cn(
@@ -854,6 +884,35 @@ function PlanPanel({
                           </div>
                           <Badge className="shrink-0" variant="outline">寄り道 {spot.detourLevel}</Badge>
                         </div>
+                        {stop && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                            <span
+                              className={cn(
+                                "font-medium tabular-nums",
+                                stop.closedConflict
+                                  ? "text-destructive"
+                                  : "text-foreground/80",
+                              )}
+                            >
+                              {formatClock(stop.arrivalMinutes)}–
+                              {formatClock(stop.departureMinutes)}
+                            </span>
+                            {spot.idealTimeOfDay &&
+                              spot.idealTimeOfDay !== "anytime" && (
+                                <span className="text-muted-foreground">
+                                  {timeOfDayLabels[spot.idealTimeOfDay]}向き
+                                </span>
+                              )}
+                            {stop.waitMinutes > 0 && (
+                              <span className="text-amber-600">
+                                開店待ち{stop.waitMinutes}分
+                              </span>
+                            )}
+                            {stop.closedConflict && (
+                              <span className="text-destructive">営業時間外</span>
+                            )}
+                          </div>
+                        )}
                         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                           {spot.description}
                         </p>

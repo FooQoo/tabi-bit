@@ -109,6 +109,47 @@ describe("optimizePlan", () => {
     expect(plan.budgetExceeded).toBe(false);
   });
 
+  it("スケジュール情報を付与する（既定の出発は 10:00）", () => {
+    const spots = [makeSpot({ id: "a", durationMinutes: 30 })];
+    const plan = optimizePlan(spots, noConstraints, noPins, noBlacklist);
+    expect(plan.startMinutes).toBe(600);
+    expect(plan.scheduledStops).toHaveLength(1);
+    expect(plan.scheduledStops[0]).toMatchObject({
+      spotId: "a",
+      arrivalMinutes: 600,
+      departureMinutes: 630,
+    });
+    expect(plan.endMinutes).toBe(630);
+  });
+
+  it("希望時間帯に合うよう訪問順を決める", () => {
+    // 同一座標（移動コスト同一）。時間帯フィットだけで順序が決まる。
+    const ids = ["m", "e"];
+    const spots = [
+      makeSpot({ id: "m", idealTimeOfDay: "morning", durationMinutes: 60 }),
+      makeSpot({ id: "e", idealTimeOfDay: "evening", durationMinutes: 60 }),
+    ];
+    const plan = optimizePlan(spots, noConstraints, new Set(ids), noBlacklist);
+    // 10:00 出発なら朝向きを先に回すのが低コスト。
+    expect(plan.spots[0].id).toBe("m");
+  });
+
+  it("営業時間外を避ける順路を選ぶ", () => {
+    const ids = ["open", "early"];
+    const spots = [
+      makeSpot({ id: "open", durationMinutes: 60 }),
+      makeSpot({
+        id: "early",
+        durationMinutes: 60,
+        openingHours: { open: "06:00", close: "11:00" },
+      }),
+    ];
+    const plan = optimizePlan(spots, noConstraints, new Set(ids), noBlacklist);
+    // 早く閉まる "early" を先に回せば抵触しない。
+    expect(plan.spots[0].id).toBe("early");
+    expect(plan.hasClosedConflict).toBe(false);
+  });
+
   it("ピン留めだけで制約超過なら exceeded フラグを立てる", () => {
     const pinnedIds = ["p0", "p1", "p2"];
     const spots = pinnedIds.map((id, i) =>

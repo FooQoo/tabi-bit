@@ -4,26 +4,37 @@ import { estimateTravel, routeTravelMinutes } from "~/domain/plan/travel";
 /** これ以下の件数なら全順列を厳密探索する。超える場合は近似（NN + 2-opt）。 */
 const EXACT_MAX = 7;
 
+/** 並び順を評価するコスト関数。小さいほど良い。 */
+export type RouteCost = (orderedSpots: GeneratedSpot[]) => number;
+
 /**
- * 訪問順を移動時間が最小になるよう並べ替える（開放経路 / 出発・帰着の固定なし）。
+ * 訪問順をコスト最小になるよう並べ替える（開放経路 / 出発・帰着の固定なし）。
+ * 既定のコストは移動時間。時刻フィットなどを含めたい場合は costFn を渡す。
  * 件数が少なければ厳密最適、多ければ nearest-neighbor + 2-opt の近似。
  */
-export function orderSpotsByRoute(spots: GeneratedSpot[]): GeneratedSpot[] {
+export function orderSpotsByRoute(
+  spots: GeneratedSpot[],
+  costFn: RouteCost = routeTravelMinutes,
+): GeneratedSpot[] {
   if (spots.length <= 2) {
+    // 2 件でも順序でコストが変わりうるので両方評価する。
+    if (spots.length === 2 && costFn([spots[1], spots[0]]) < costFn(spots)) {
+      return [spots[1], spots[0]];
+    }
     return [...spots];
   }
   if (spots.length <= EXACT_MAX) {
-    return exactOrder(spots);
+    return exactOrder(spots, costFn);
   }
-  return twoOpt(nearestNeighborOrder(spots));
+  return twoOpt(nearestNeighborOrder(spots), costFn);
 }
 
-function exactOrder(spots: GeneratedSpot[]): GeneratedSpot[] {
+function exactOrder(spots: GeneratedSpot[], costFn: RouteCost): GeneratedSpot[] {
   let best = spots;
-  let bestCost = routeTravelMinutes(spots);
+  let bestCost = costFn(spots);
 
   for (const permutation of permute(spots)) {
-    const cost = routeTravelMinutes(permutation);
+    const cost = costFn(permutation);
     if (cost < bestCost) {
       best = permutation;
       bestCost = cost;
@@ -47,7 +58,7 @@ function* permute(spots: GeneratedSpot[]): Generator<GeneratedSpot[]> {
 }
 
 function nearestNeighborOrder(spots: GeneratedSpot[]): GeneratedSpot[] {
-  // 各始点から貪欲に最近スポットを辿り、最も短い経路を採用する。
+  // 各始点から貪欲に最近スポットを辿り、最も短い経路を採用する（近似の初期解）。
   let best: GeneratedSpot[] | null = null;
   let bestCost = Number.POSITIVE_INFINITY;
 
@@ -80,9 +91,9 @@ function nearestNeighborOrder(spots: GeneratedSpot[]): GeneratedSpot[] {
   return best ?? [...spots];
 }
 
-function twoOpt(initial: GeneratedSpot[]): GeneratedSpot[] {
+function twoOpt(initial: GeneratedSpot[], costFn: RouteCost): GeneratedSpot[] {
   let route = [...initial];
-  let bestCost = routeTravelMinutes(route);
+  let bestCost = costFn(route);
   let improved = true;
 
   while (improved) {
@@ -94,7 +105,7 @@ function twoOpt(initial: GeneratedSpot[]): GeneratedSpot[] {
           ...route.slice(i, k + 1).reverse(),
           ...route.slice(k + 1),
         ];
-        const cost = routeTravelMinutes(candidate);
+        const cost = costFn(candidate);
         if (cost < bestCost) {
           route = candidate;
           bestCost = cost;

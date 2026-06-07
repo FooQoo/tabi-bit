@@ -2,6 +2,11 @@ import type { GeneratedSpot } from "~/domain/spot/spot";
 import type { OptimizedPlan, PlanConstraints } from "~/domain/plan/plan";
 import { orderSpotsByRoute } from "~/domain/plan/route-order";
 import {
+  buildSchedule,
+  DEFAULT_START_MINUTES,
+  timeOfDayMismatch,
+} from "~/domain/plan/schedule";
+import {
   buildTravelLegs,
   estimateTravel,
   routeTravelMinutes,
@@ -30,6 +35,14 @@ const WEIGHTS = {
   travelPenaltyPerMinute: 0.7,
   /** カテゴリ・地域が重複したときの減点。 */
   varietyPenalty: 18,
+} as const;
+
+/** 訪問順の評価に用いる時刻関連ペナルティ（分換算）。 */
+const SCHEDULE_PENALTY = {
+  /** 希望時間帯と実際の時間帯がずれたときの減点。 */
+  timeOfDayMismatch: 30,
+  /** 営業時間外で見学できないときの減点（実質的に回避させる大きさ）。 */
+  closedConflict: 600,
 } as const;
 
 export function optimizePlan(
@@ -70,23 +83,43 @@ export function optimizePlan(
     usedMunicipalities.add(municipalityKeyOf(nextSpot));
   }
 
-  // 採用スポットを移動時間が最小になる訪問順に並べ替える。
-  const orderedSpots = orderSpotsByRoute(selectedSpots);
+  // 出発時刻を含めて、移動 + 開店待ち + 時間帯フィット + 閉店抵触が
+  // 最小になる訪問順に並べ替える。
+  const startMinutes = constraints.startMinutes ?? DEFAULT_START_MINUTES;
+  const orderedSpots = orderSpotsByRoute(
+    selectedSpots,
+    (candidate) => scheduleCost(candidate, startMinutes),
+  );
+
+  const scheduledStops = buildSchedule(orderedSpots, startMinutes);
   const travelLegs = buildTravelLegs(orderedSpots);
   const totalStayMinutes = sumStayMinutes(orderedSpots);
   const totalTravelMinutes = travelLegs.reduce(
     (total, leg) => total + leg.minutes,
     0,
   );
+  const totalWaitMinutes = scheduledStops.reduce(
+    (total, stop) => total + stop.waitMinutes,
+    0,
+  );
   const totalDurationMinutes = totalStayMinutes + totalTravelMinutes;
+  const endMinutes =
+    scheduledStops.length === 0
+      ? startMinutes
+      : scheduledStops[scheduledStops.length - 1].departureMinutes;
   const totalBudgetMax = sumBudgetMax(orderedSpots);
 
   return {
     spots: orderedSpots,
     travelLegs,
+    scheduledStops,
     totalStayMinutes,
     totalTravelMinutes,
+    totalWaitMinutes,
     totalDurationMinutes,
+    startMinutes,
+    endMinutes,
+    hasClosedConflict: scheduledStops.some((stop) => stop.closedConflict),
     totalBudgetYen: orderedSpots.reduce(
       (total, spot) => ({
         min: total.min + spot.budgetYen.min,
@@ -141,6 +174,28 @@ function pickNextSpot(
   }
 
   return best?.spot ?? null;
+}
+
+/**
+ * 訪問順を評価するコスト。移動時間に加え、開店待ち・時間帯ミスマッチ・
+ * 閉店抵触を分換算で合算する。小さいほど良い順路。
+ */
+function scheduleCost(orderedSpots: GeneratedSpot[], startMinutes: number): number {
+  const schedule = buildSchedule(orderedSpots, startMinutes);
+  let cost = routeTravelMinutes(orderedSpots);
+
+  for (let i = 0; i < orderedSpots.length; i += 1) {
+    const stop = schedule[i];
+    cost += stop.waitMinutes;
+    cost +=
+      timeOfDayMismatch(orderedSpots[i], stop.arrivalMinutes) *
+      SCHEDULE_PENALTY.timeOfDayMismatch;
+    if (stop.closedConflict) {
+      cost += SCHEDULE_PENALTY.closedConflict;
+    }
+  }
+
+  return cost;
 }
 
 function staticScore(spot: GeneratedSpot): number {
