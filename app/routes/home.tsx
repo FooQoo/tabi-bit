@@ -65,6 +65,7 @@ import { formatClock, parseClock } from "~/domain/plan/schedule";
 // --- Session storage ---
 const SESSION_KEY_PREFIX = "tabi-bit:session:";
 const SESSION_INDEX_KEY = "tabi-bit:sessions";
+const SESSION_PATH_PREFIX = "/sessions/";
 const MAX_SESSIONS = 20;
 
 type SessionEntry = {
@@ -154,6 +155,17 @@ function loadSessionIndex(): SessionEntry[] {
     return [];
   }
 }
+
+function getSessionIdFromLocation() {
+  if (!window.location.pathname.startsWith(SESSION_PATH_PREFIX)) return null;
+
+  const sessionId = window.location.pathname.slice(SESSION_PATH_PREFIX.length);
+  return sessionId ? decodeURIComponent(sessionId) : null;
+}
+
+function getSessionPath(sessionId: string) {
+  return `${SESSION_PATH_PREFIX}${encodeURIComponent(sessionId)}`;
+}
 // --- End session storage ---
 
 type FeedEvent =
@@ -165,6 +177,13 @@ type FeedInput = {
   travelImage: string;
   prefecture: Prefecture;
 };
+
+const TRAVEL_IMAGE_EXAMPLES = [
+  "雨の日に歩きたい",
+  "本屋と喫茶店",
+  "静かな海辺",
+  "変な寄り道多め",
+];
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -255,31 +274,62 @@ export default function Home() {
     plans.find((p) => p.profile.id === selectedProfileId)?.plan ??
     plans[0].plan;
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get("s");
-    if (sessionId) {
-      const session = loadSession(sessionId);
-      if (session && session.spots.length > 0) {
-        const input = {
-          travelImage: session.travelImage,
-          prefecture: session.prefecture,
-        };
-        activeSessionRef.current = {
-          id: session.id,
-          input,
-          createdAt: session.createdAt,
-        };
-        setFeedInput(input);
-        setSpots(session.spots);
-        if (session.pinnedSpotIds) setPinnedSpotIds(new Set(session.pinnedSpotIds));
-        if (session.blacklistedSpotIds) setBlacklistedSpotIds(new Set(session.blacklistedSpotIds));
-      } else {
-        window.history.replaceState(null, "", window.location.pathname);
-      }
-    }
+  const resetViewToHome = useCallback(() => {
+    activeSessionRef.current = null;
+    setFeedInput(null);
+    setSpots([]);
+    setError(null);
+    setPinnedSpotIds(new Set());
+    setBlacklistedSpotIds(new Set());
     setSessionHistory(loadSessionIndex());
   }, []);
+
+  const restoreSession = useCallback((session: StoredSession) => {
+    const input = {
+      travelImage: session.travelImage,
+      prefecture: session.prefecture,
+    };
+
+    activeSessionRef.current = {
+      id: session.id,
+      input,
+      createdAt: session.createdAt,
+    };
+
+    setFeedInput(input);
+    setSpots(session.spots);
+    setError(null);
+    setPinnedSpotIds(new Set(session.pinnedSpotIds ?? []));
+    setBlacklistedSpotIds(new Set(session.blacklistedSpotIds ?? []));
+  }, []);
+
+  const syncViewToLocation = useCallback(() => {
+    const sessionId = getSessionIdFromLocation();
+
+    if (!sessionId) {
+      resetViewToHome();
+      return;
+    }
+
+    const session = loadSession(sessionId);
+    if (session && session.spots.length > 0) {
+      restoreSession(session);
+      setSessionHistory(loadSessionIndex());
+      return;
+    }
+
+    window.history.replaceState(null, "", "/");
+    resetViewToHome();
+  }, [resetViewToHome, restoreSession]);
+
+  useEffect(() => {
+    syncViewToLocation();
+    window.addEventListener("popstate", syncViewToLocation);
+
+    return () => {
+      window.removeEventListener("popstate", syncViewToLocation);
+    };
+  }, [syncViewToLocation]);
 
   useEffect(() => {
     spotsRef.current = spots;
@@ -396,7 +446,7 @@ export default function Home() {
       spots: [],
       createdAt,
     });
-    window.history.pushState(null, "", `?s=${sessionId}`);
+    window.history.pushState(null, "", getSessionPath(sessionId));
 
     setFeedInput(input);
     setSpots([]);
@@ -419,7 +469,7 @@ export default function Home() {
       spots: [],
       createdAt,
     });
-    window.history.pushState(null, "", `?s=${sessionId}`);
+    window.history.pushState(null, "", getSessionPath(sessionId));
 
     setSpots([]);
     setError(null);
@@ -448,8 +498,11 @@ export default function Home() {
     return (
       <main className="min-h-screen bg-[radial-gradient(circle_at_50%_18%,oklch(0.94_0.07_170),transparent_30%),linear-gradient(180deg,oklch(0.99_0.02_100),oklch(0.96_0.02_250))] px-4 text-foreground">
         <section className="mx-auto flex min-h-screen w-full max-w-3xl flex-col items-center justify-center gap-8 py-16">
-          <div className="flex flex-col items-center gap-3">
+          <div className="flex flex-col items-center gap-3 text-center">
             <img alt="tabiBit." className="w-64 md:w-80" src="/logo.png" />
+            <p className="max-w-lg text-balance text-sm leading-6 text-muted-foreground md:text-base">
+              旅の気分から、実在する寄り道スポットを生成します。
+            </p>
           </div>
 
           <form
@@ -474,7 +527,7 @@ export default function Home() {
                   value={prefectureCode}
                 >
                   <SelectTrigger
-                    aria-label="都道府県"
+                    aria-label="行きたい都道府県"
                     className="!h-14 w-full rounded-full border-border/70 bg-background/80 px-5"
                   >
                     <SelectValue placeholder="都道府県" />
@@ -496,6 +549,21 @@ export default function Home() {
                 </Button>
               </div>
             </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                入力例
+              </span>
+              {TRAVEL_IMAGE_EXAMPLES.map((example) => (
+                <button
+                  className="rounded-full border border-border/70 bg-background/70 px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-card hover:text-foreground"
+                  key={example}
+                  onClick={() => setTravelImage(example)}
+                  type="button"
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
           </form>
 
           {sessionHistory.length > 0 && (
@@ -511,18 +579,12 @@ export default function Home() {
                     onClick={() => {
                       const session = loadSession(entry.id);
                       if (session && session.spots.length > 0) {
-                        const input = {
-                          travelImage: session.travelImage,
-                          prefecture: session.prefecture,
-                        };
-                        activeSessionRef.current = {
-                          id: session.id,
-                          input,
-                          createdAt: session.createdAt,
-                        };
-                        setFeedInput(input);
-                        setSpots(session.spots);
-                        window.history.pushState(null, "", `?s=${session.id}`);
+                        restoreSession(session);
+                        window.history.pushState(
+                          null,
+                          "",
+                          getSessionPath(session.id),
+                        );
                       }
                     }}
                     type="button"
@@ -553,12 +615,8 @@ export default function Home() {
           <button
             className="mb-3 inline-flex items-center gap-2 opacity-80 transition hover:opacity-100"
             onClick={() => {
-              setFeedInput(null);
-              setSpots([]);
-              setError(null);
-              activeSessionRef.current = null;
-              setSessionHistory(loadSessionIndex());
-              window.history.pushState(null, "", window.location.pathname);
+              resetViewToHome();
+              window.history.pushState(null, "", "/");
             }}
             type="button"
           >
