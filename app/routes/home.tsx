@@ -47,6 +47,7 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
+import { PlanMap } from "~/components/plan-map";
 import { cn } from "~/lib/utils";
 import { prefectures, type Prefecture } from "~/domain/prefecture/prefecture";
 import {
@@ -1029,6 +1030,8 @@ function PlanPanel({
                 );
               })}
             </ol>
+
+            <PlanMap spots={plan.spots} travelLegs={plan.travelLegs} />
           </>
         )}
       </CardContent>
