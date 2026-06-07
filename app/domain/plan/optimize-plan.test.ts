@@ -240,4 +240,50 @@ describe("generatePlans", () => {
 
     expect(countFood(foodie)).toBeGreaterThan(countFood(balanced));
   });
+
+  it("贅沢は予算上限近くまで、より高額なスポットを選ぶ", () => {
+    // 同一座標（移動差なし）で、高額・安価のスポットを混在させる。
+    const cheap = Array.from({ length: 5 }, (_, i) =>
+      makeSpot({ id: `c${i}`, budgetYen: { min: 500, max: 1000 } }),
+    );
+    const pricey = Array.from({ length: 5 }, (_, i) =>
+      makeSpot({ id: `p${i}`, budgetYen: { min: 5000, max: 8000 } }),
+    );
+    const spots = [...cheap, ...pricey];
+
+    const plans = generatePlans(
+      spots,
+      { maxBudgetYen: 30000 },
+      noPins,
+      noBlacklist,
+    );
+    const balanced = plans.find((p) => p.profile.id === "balanced")!.plan;
+    const luxury = plans.find((p) => p.profile.id === "luxury")!.plan;
+
+    // 上限内に収まりつつ、バランス案より高い総額になる。
+    expect(luxury.totalBudgetYen.max).toBeLessThanOrEqual(30000);
+    expect(luxury.totalBudgetYen.max).toBeGreaterThan(balanced.totalBudgetYen.max);
+  });
+
+  it("飲食系（食事・カフェ）を連続させない", () => {
+    // 同一座標（移動差なし）。間に挟める非飲食スポットを十分用意する。
+    const food = makeSpot({ id: "food", category: "food" });
+    const cafe = makeSpot({ id: "cafe", category: "cafe" });
+    const nature = Array.from({ length: 6 }, (_, i) =>
+      makeSpot({ id: `n${i}`, category: "nature" }),
+    );
+    const spots = [food, cafe, ...nature];
+
+    const plans = generatePlans(spots, {}, noPins, noBlacklist);
+    const isMeal = (category: string) =>
+      category === "food" || category === "cafe";
+
+    for (const { plan } of plans) {
+      for (let i = 1; i < plan.spots.length; i += 1) {
+        const consecutiveMeal =
+          isMeal(plan.spots[i].category) && isMeal(plan.spots[i - 1].category);
+        expect(consecutiveMeal).toBe(false);
+      }
+    }
+  });
 });

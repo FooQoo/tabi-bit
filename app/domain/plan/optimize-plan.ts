@@ -34,6 +34,8 @@ const WEIGHTS = {
   durationPenaltyStepMinutes: 30,
   /** 予算中央値をこの額で割った分を減点。 */
   budgetPenaltyDivisor: 3000,
+  /** 予算中央値をこの額で割った分を加点（贅沢プラン用。0 で無効）。 */
+  budgetBonusDivisor: 0,
   /** 直近クラスタからの移動 1 分あたりの減点。 */
   travelPenaltyPerMinute: 0.7,
   /** カテゴリ・地域が重複したときの減点。 */
@@ -46,7 +48,12 @@ const SCHEDULE_PENALTY = {
   timeOfDayMismatch: 30,
   /** 営業時間外で見学できないときの減点（実質的に回避させる大きさ）。 */
   closedConflict: 600,
+  /** 飲食系（食事・カフェ）が連続したときの減点（実質的に回避させる大きさ）。 */
+  mealAdjacency: 600,
 } as const;
+
+/** 連続を避けたい飲食系カテゴリ。 */
+const MEAL_CATEGORIES = new Set<SpotCategory>(["food", "cafe"]);
 
 type PlanWeights = Record<keyof typeof WEIGHTS, number>;
 type CategoryBoost = Partial<Record<SpotCategory, number>>;
@@ -97,6 +104,15 @@ export const PLAN_PROFILES: PlanProfile[] = [
     maxSpots: MAX_PLAN_SPOTS,
     weights: {},
     categoryBoost: { food: 20, cafe: 14 },
+  },
+  {
+    id: "luxury",
+    label: "贅沢",
+    description: "予算の上限近くまで、少し贅沢なスポットを選びます。",
+    maxSpots: MAX_PLAN_SPOTS,
+    // 予算ペナルティを実質無効化し、代わりに予算額そのものを加点に回す。
+    weights: { budgetPenaltyDivisor: Number.MAX_SAFE_INTEGER, budgetBonusDivisor: 500 },
+    categoryBoost: {},
   },
 ];
 
@@ -277,6 +293,14 @@ function scheduleCost(orderedSpots: GeneratedSpot[], startMinutes: number): numb
     if (stop.closedConflict) {
       cost += SCHEDULE_PENALTY.closedConflict;
     }
+    // 直前のスポットと連続で飲食系（食事・カフェ）になる並びを避ける。
+    if (
+      i > 0 &&
+      MEAL_CATEGORIES.has(orderedSpots[i].category) &&
+      MEAL_CATEGORIES.has(orderedSpots[i - 1].category)
+    ) {
+      cost += SCHEDULE_PENALTY.mealAdjacency;
+    }
   }
 
   return cost;
@@ -292,6 +316,11 @@ function staticScore(
     Math.max(0, spot.durationMinutes - weights.durationSoftCapMinutes) /
     weights.durationPenaltyStepMinutes;
   const budgetPenalty = budgetMidpoint / weights.budgetPenaltyDivisor;
+  // 贅沢プランでは予算額が高いほど加点し、上限近くまで選び取らせる。
+  const budgetBonus =
+    weights.budgetBonusDivisor > 0
+      ? budgetMidpoint / weights.budgetBonusDivisor
+      : 0;
   const detourBonus = spot.detourLevel * weights.detourBonusPerLevel;
   const compactBonus =
     spot.durationMinutes >= weights.compactMinMinutes &&
@@ -299,7 +328,14 @@ function staticScore(
       ? weights.compactBonus
       : 0;
   const boost = categoryBoost[spot.category] ?? 0;
-  return detourBonus + compactBonus + boost - durationPenalty - budgetPenalty;
+  return (
+    detourBonus +
+    compactBonus +
+    boost +
+    budgetBonus -
+    durationPenalty -
+    budgetPenalty
+  );
 }
 
 /** 候補と既選択クラスタとの近さ（最寄りスポットへの移動分）。順序に依存しない。 */
