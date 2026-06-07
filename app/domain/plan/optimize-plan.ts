@@ -183,13 +183,33 @@ export function optimizePlan(
     usedMunicipalities.add(municipalityKeyOf(nextSpot));
   }
 
-  // 出発時刻を含めて、移動 + 開店待ち + 時間帯フィット + 閉店抵触が
-  // 最小になる訪問順に並べ替える。
+  // 出発時刻を含めて、移動 + 開店待ち + 時間帯フィット + 閉店抵触 +
+  // 飲食連続回避が最小になる訪問順に並べ替える。
   const startMinutes = constraints.startMinutes ?? DEFAULT_START_MINUTES;
-  const orderedSpots = orderSpotsByRoute(
-    selectedSpots,
-    (candidate) => scheduleCost(candidate, startMinutes),
-  );
+  const costFn = (candidate: GeneratedSpot[]) =>
+    scheduleCost(candidate, startMinutes);
+  let orderedSpots = orderSpotsByRoute(selectedSpots, costFn);
+
+  // 最終的な訪問順は移動以外（待ち・時間帯・飲食連続回避）も加味して決まるため、
+  // 選定時に用いた移動上界より実移動が大きくなり、所要時間上限を超えることがある。
+  // その場合は価値の低い非ピンスポットから外し、上限内に収め直す。
+  if (constraints.maxDurationMinutes !== undefined) {
+    const scoreOf = new Map(
+      scoredUnpinned.map(({ spot, score }) => [spot.id, score]),
+    );
+    while (
+      sumStayMinutes(orderedSpots) + routeTravelMinutes(orderedSpots) >
+        constraints.maxDurationMinutes &&
+      orderedSpots.some((spot) => !pinnedSpotIds.has(spot.id))
+    ) {
+      const worst = lowestScoreUnpinned(orderedSpots, pinnedSpotIds, scoreOf);
+      if (!worst) break;
+      orderedSpots = orderSpotsByRoute(
+        orderedSpots.filter((spot) => spot.id !== worst),
+        costFn,
+      );
+    }
+  }
 
   const scheduledStops = buildSchedule(orderedSpots, startMinutes);
   const travelLegs = buildTravelLegs(orderedSpots);
@@ -376,6 +396,25 @@ function fitsConstraints(
   }
 
   return true;
+}
+
+/** 順路中の非ピンスポットのうち、最もスコアの低いスポット id を返す。 */
+function lowestScoreUnpinned(
+  orderedSpots: GeneratedSpot[],
+  pinnedSpotIds: Set<string>,
+  scoreOf: Map<string, number>,
+): string | null {
+  let worstId: string | null = null;
+  let worstScore = Number.POSITIVE_INFINITY;
+  for (const spot of orderedSpots) {
+    if (pinnedSpotIds.has(spot.id)) continue;
+    const score = scoreOf.get(spot.id) ?? 0;
+    if (score < worstScore) {
+      worstScore = score;
+      worstId = spot.id;
+    }
+  }
+  return worstId;
 }
 
 function municipalityKeyOf(spot: GeneratedSpot): string {
