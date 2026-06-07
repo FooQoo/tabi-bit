@@ -735,7 +735,7 @@ function PlanPanel({
         <CardTitle className="tracking-normal">
           {activeProfile ? `${activeProfile.label}案` : "プラン案"}
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="block min-h-[2.5rem]">
           {activeProfile?.description ??
             "生成済みスポットから条件に合わせて組み立てます。"}
         </CardDescription>
