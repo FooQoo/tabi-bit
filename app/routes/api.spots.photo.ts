@@ -1,5 +1,5 @@
 import type { Route } from "./+types/api.spots.photo";
-import { getPlacesApiKey } from "~/server/infrastructure/google-places";
+import { getPlacesApiKey } from "~/server/repositories/google-places";
 import { resolveSpotPhotos } from "~/server/services/spot-photo";
 
 function jsonResponse(photoUrls: string[], cacheSeconds: number) {
