@@ -28,6 +28,7 @@ import {
   Utensils,
 } from "lucide-react";
 
+import * as Sentry from "@sentry/react-router";
 import type { Route } from "./+types/home";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -410,7 +411,11 @@ export default function Home() {
         if (placeId) savePlaceId(id, placeId);
       }
       setPlaceIds((prev) => ({ ...prev, ...resolved }));
-    } catch {
+    } catch (error) {
+      Sentry.captureException(error, {
+        tags: { feature: "place-id-resolve" },
+        extra: { spotCount: spots.length },
+      });
       // 名前解決失敗: 各スポットを "" にして skeleton を解除する
       const fallback: Record<string, string> = {};
       for (const spot of spots) fallback[spot.id] = "";
@@ -494,7 +499,9 @@ export default function Home() {
           }
         }
       } catch (streamError) {
-        console.error(streamError);
+        Sentry.captureException(streamError, {
+          tags: { feature: "spot-stream" },
+        });
         setError("スポット生成に失敗しました。");
       } finally {
         isGeneratingRef.current = false;
