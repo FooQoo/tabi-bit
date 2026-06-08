@@ -12,7 +12,6 @@ import {
   Ban,
   Bike,
   Car,
-  ChevronLeft,
   ChevronRight,
   Coffee,
   Compass,
@@ -68,6 +67,23 @@ const SESSION_KEY_PREFIX = "tabi-bit:session:";
 const SESSION_INDEX_KEY = "tabi-bit:sessions";
 const SESSION_PATH_PREFIX = "/sessions/";
 const MAX_SESSIONS = 20;
+const PLACE_ID_KEY_PREFIX = "tabi-bit:placeId:";
+
+function savePlaceId(spotId: string, placeId: string) {
+  try {
+    localStorage.setItem(`${PLACE_ID_KEY_PREFIX}${spotId}`, placeId);
+  } catch {
+    // localStorage unavailable
+  }
+}
+
+function loadPlaceId(spotId: string): string | null {
+  try {
+    return localStorage.getItem(`${PLACE_ID_KEY_PREFIX}${spotId}`);
+  } catch {
+    return null;
+  }
+}
 
 type SessionEntry = {
   id: string;
@@ -361,6 +377,33 @@ export default function Home() {
     );
   }, [pinnedSpotIds, blacklistedSpotIds]);
 
+  const batchResolvePlaceIds = useCallback(async (spots: GeneratedSpot[]) => {
+    try {
+      const body = {
+        spots: spots.map((spot) => ({
+          id: spot.id,
+          name: spot.name,
+          area: [spot.municipality, spot.prefecture].filter(Boolean).join(" "),
+        })),
+      };
+      const response = await fetch("/api/spots/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await response.json()) as {
+        results: Array<{ id: string; placeId: string | null }>;
+      };
+      for (const { id, placeId } of data.results) {
+        if (placeId) {
+          savePlaceId(id, placeId);
+        }
+      }
+    } catch {
+      // 名前解決失敗は無視（画像取得時にテキスト検索でフォールバック）
+    }
+  }, []);
+
   const readSpotStream = useCallback(
     async (input: FeedInput, alreadyGeneratedCount: number) => {
       if (
@@ -373,6 +416,8 @@ export default function Home() {
       isGeneratingRef.current = true;
       setIsGenerating(true);
       setError(null);
+
+      const newlyGeneratedSpots: GeneratedSpot[] = [];
 
       try {
         const response = await fetch("/api/spots/stream", {
@@ -422,6 +467,7 @@ export default function Home() {
                 return [...currentSpots, event.spot];
               });
               localAccumulated.push(event.spot);
+              newlyGeneratedSpots.push(event.spot);
               const activeSession = activeSessionRef.current;
               if (activeSession) {
                 updateSessionSpots(activeSession.id, localAccumulated);
@@ -439,6 +485,9 @@ export default function Home() {
       } finally {
         isGeneratingRef.current = false;
         setIsGenerating(false);
+        if (newlyGeneratedSpots.length > 0) {
+          void batchResolvePlaceIds(newlyGeneratedSpots);
+        }
       }
     },
     [],
@@ -1155,8 +1204,7 @@ type PhotoStatus = "loading" | "loaded" | "none";
 
 const SpotPhoto = memo(function SpotPhoto({ spot }: { spot: GeneratedSpot }) {
   const [status, setStatus] = useState<PhotoStatus>("loading");
-  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1166,7 +1214,7 @@ const SpotPhoto = memo(function SpotPhoto({ spot }: { spot: GeneratedSpot }) {
     let didFetch = false;
     const controller = new AbortController();
 
-    const fetchPhotos = async () => {
+    const fetchPhoto = async () => {
       if (didFetch) return;
       didFetch = true;
 
@@ -1175,20 +1223,20 @@ const SpotPhoto = memo(function SpotPhoto({ spot }: { spot: GeneratedSpot }) {
           .filter(Boolean)
           .join(" ");
         const params = new URLSearchParams({ name: spot.name, area });
+        const placeId = loadPlaceId(spot.id);
+        if (placeId) params.set("placeId", placeId);
+
         const response = await fetch(`/api/spots/photo?${params.toString()}`, {
           signal: controller.signal,
         });
         const data = (await response.json()) as { photoUrls: string[] };
+        const url = data.photoUrls[0] ?? null;
 
-        if (data.photoUrls.length > 0) {
-          startTransition(() => {
-            setPhotoUrls(data.photoUrls);
-            setStatus("loaded");
-          });
-        } else {
-          startTransition(() => setStatus("none"));
-        }
-      } catch (error) {
+        startTransition(() => {
+          setPhotoUrl(url);
+          setStatus(url ? "loaded" : "none");
+        });
+      } catch {
         if (!controller.signal.aborted) {
           startTransition(() => setStatus("none"));
         }
@@ -1199,7 +1247,7 @@ const SpotPhoto = memo(function SpotPhoto({ spot }: { spot: GeneratedSpot }) {
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
           observer.disconnect();
-          void fetchPhotos();
+          void fetchPhoto();
         }
       },
       { rootMargin: "200px" },
@@ -1211,74 +1259,24 @@ const SpotPhoto = memo(function SpotPhoto({ spot }: { spot: GeneratedSpot }) {
       observer.disconnect();
       controller.abort();
     };
-  }, [spot.municipality, spot.name, spot.prefecture]);
+  }, [spot.id, spot.municipality, spot.name, spot.prefecture]);
 
   const fallback = categoryVisual[spot.category];
   const FallbackIcon = fallback.icon;
-
-  const prev = () =>
-    setCurrentIndex((i) => (i - 1 + photoUrls.length) % photoUrls.length);
-  const next = () => setCurrentIndex((i) => (i + 1) % photoUrls.length);
 
   return (
     <div
       className="relative -mt-4 aspect-video w-full overflow-hidden rounded-t-xl bg-muted"
       ref={containerRef}
     >
-      {status === "loaded" && photoUrls.length > 0 ? (
-        <>
-          <div
-            className="flex h-full transition-transform duration-300 ease-in-out"
-            style={{ transform: `translateX(-${currentIndex * 100}%)` }}
-          >
-            {photoUrls.map((url, i) => (
-              <img
-                alt={`${spot.name} ${i + 1}`}
-                className="h-full w-full flex-shrink-0 object-cover"
-                decoding="async"
-                key={url}
-                loading="lazy"
-                src={url}
-              />
-            ))}
-          </div>
-
-          {photoUrls.length > 1 && (
-            <>
-              <button
-                aria-label="前の写真"
-                className="absolute left-1.5 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-1 text-white backdrop-blur-sm transition hover:bg-black/60"
-                onClick={prev}
-                type="button"
-              >
-                <ChevronLeft className="size-4" />
-              </button>
-              <button
-                aria-label="次の写真"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-1 text-white backdrop-blur-sm transition hover:bg-black/60"
-                onClick={next}
-                type="button"
-              >
-                <ChevronRight className="size-4" />
-              </button>
-              <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
-                {photoUrls.map((_, i) => (
-                  <button
-                    aria-label={`写真 ${i + 1}`}
-                    className={`size-1.5 rounded-full transition-all ${
-                      i === currentIndex
-                        ? "bg-white"
-                        : "bg-white/45 hover:bg-white/70"
-                    }`}
-                    key={i}
-                    onClick={() => setCurrentIndex(i)}
-                    type="button"
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </>
+      {status === "loaded" && photoUrl ? (
+        <img
+          alt={spot.name}
+          className="h-full w-full object-cover"
+          decoding="async"
+          loading="lazy"
+          src={photoUrl}
+        />
       ) : status === "loading" ? (
         <Skeleton className="h-full w-full rounded-none" />
       ) : (
@@ -1310,6 +1308,8 @@ const SpotThumbnail = memo(function SpotThumbnail({ spot }: { spot: GeneratedSpo
       try {
         const area = [spot.municipality, spot.prefecture].filter(Boolean).join(" ");
         const params = new URLSearchParams({ name: spot.name, area });
+        const placeId = loadPlaceId(spot.id);
+        if (placeId) params.set("placeId", placeId);
         const response = await fetch(`/api/spots/photo?${params.toString()}`, {
           signal: controller.signal,
         });
@@ -1334,7 +1334,7 @@ const SpotThumbnail = memo(function SpotThumbnail({ spot }: { spot: GeneratedSpo
     );
     observer.observe(element);
     return () => { observer.disconnect(); controller.abort(); };
-  }, [spot.municipality, spot.name, spot.prefecture]);
+  }, [spot.id, spot.municipality, spot.name, spot.prefecture]);
 
   const fallback = categoryVisual[spot.category];
   const FallbackIcon = fallback.icon;
