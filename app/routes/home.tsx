@@ -222,6 +222,8 @@ export default function Home() {
   const [sessionHistory, setSessionHistory] = useState<SessionEntry[]>([]);
   const [pinnedSpotIds, setPinnedSpotIds] = useState<Set<string>>(new Set());
   const [blacklistedSpotIds, setBlacklistedSpotIds] = useState<Set<string>>(new Set());
+  // null = 未解決, "" = 解決済みだがPlace ID無し, "ChIJ..." = 有効なPlace ID
+  const [placeIds, setPlaceIds] = useState<Record<string, string>>({});
   const isGeneratingRef = useRef(false);
   const spotsRef = useRef<GeneratedSpot[]>([]);
   const travelImageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -309,6 +311,7 @@ export default function Home() {
     setError(null);
     setPinnedSpotIds(new Set());
     setBlacklistedSpotIds(new Set());
+    setPlaceIds({});
     setSessionHistory(loadSessionIndex());
   }, []);
 
@@ -324,11 +327,17 @@ export default function Home() {
       createdAt: session.createdAt,
     };
 
+    const restoredPlaceIds: Record<string, string> = {};
+    for (const spot of session.spots) {
+      restoredPlaceIds[spot.id] = loadPlaceId(spot.id) ?? "";
+    }
+
     setFeedInput(input);
     setSpots(session.spots);
     setError(null);
     setPinnedSpotIds(new Set(session.pinnedSpotIds ?? []));
     setBlacklistedSpotIds(new Set(session.blacklistedSpotIds ?? []));
+    setPlaceIds(restoredPlaceIds);
   }, []);
 
   const syncViewToLocation = useCallback(() => {
@@ -394,13 +403,17 @@ export default function Home() {
       const data = (await response.json()) as {
         results: Array<{ id: string; placeId: string | null }>;
       };
+      const resolved: Record<string, string> = {};
       for (const { id, placeId } of data.results) {
-        if (placeId) {
-          savePlaceId(id, placeId);
-        }
+        resolved[id] = placeId ?? "";
+        if (placeId) savePlaceId(id, placeId);
       }
+      setPlaceIds((prev) => ({ ...prev, ...resolved }));
     } catch {
-      // 名前解決失敗は無視（画像取得時にテキスト検索でフォールバック）
+      // 名前解決失敗: 各スポットを "" にして skeleton を解除する
+      const fallback: Record<string, string> = {};
+      for (const spot of spots) fallback[spot.id] = "";
+      setPlaceIds((prev) => ({ ...prev, ...fallback }));
     }
   }, []);
 
@@ -518,6 +531,7 @@ export default function Home() {
     setError(null);
     setPinnedSpotIds(new Set());
     setBlacklistedSpotIds(new Set());
+    setPlaceIds({});
     void readSpotStream(input, 0);
   }, [readSpotStream, selectedPrefecture, travelImage]);
 
@@ -540,6 +554,7 @@ export default function Home() {
     setError(null);
     setPinnedSpotIds(new Set());
     setBlacklistedSpotIds(new Set());
+    setPlaceIds({});
     void readSpotStream(feedInput, 0);
   }, [feedInput, readSpotStream]);
 
@@ -733,6 +748,7 @@ export default function Home() {
           onStartTimeChange={setStartTime}
           onTogglePin={togglePin}
           plan={optimizedPlan}
+          placeIds={placeIds}
           profiles={plans}
           selectedProfileId={selectedProfileId}
           startTime={startTime}
@@ -749,6 +765,7 @@ export default function Home() {
               key={spot.id}
               onToggleBlacklist={toggleBlacklist}
               onTogglePin={togglePin}
+              placeId={placeIds[spot.id] ?? null}
               spot={spot}
             />
           ))}
@@ -772,6 +789,7 @@ export default function Home() {
           onStartTimeChange={setStartTime}
           onTogglePin={togglePin}
           plan={optimizedPlan}
+          placeIds={placeIds}
           profiles={plans}
           selectedProfileId={selectedProfileId}
           startTime={startTime}
@@ -841,6 +859,7 @@ function PlanPanel({
   onStartTimeChange,
   onTogglePin,
   plan,
+  placeIds,
   profiles,
   selectedProfileId,
   startTime,
@@ -854,6 +873,7 @@ function PlanPanel({
   onStartTimeChange: (value: string) => void;
   onTogglePin: (id: string) => void;
   plan: OptimizedPlan;
+  placeIds: Record<string, string>;
   profiles: Array<{ profile: PlanProfile; plan: OptimizedPlan }>;
   selectedProfileId: string;
   startTime: string;
@@ -1078,7 +1098,7 @@ function PlanPanel({
                         onClick={() => onSpotClick(spot.id)}
                       >
                         <div className="flex items-start gap-3">
-                          <SpotThumbnail spot={spot} />
+                          <SpotThumbnail placeId={placeIds[spot.id] ?? null} spot={spot} />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-1">
                               <div className="flex min-w-0 items-center gap-1">
@@ -1202,64 +1222,76 @@ const categoryVisual: Record<
 
 type PhotoStatus = "loading" | "loaded" | "none";
 
-const SpotPhoto = memo(function SpotPhoto({ spot }: { spot: GeneratedSpot }) {
+const SpotPhoto = memo(function SpotPhoto({
+  spot,
+  placeId,
+}: {
+  spot: GeneratedSpot;
+  placeId: string | null;
+}) {
   const [status, setStatus] = useState<PhotoStatus>("loading");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inViewportRef = useRef(false);
+  const didFetchRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  // Always up-to-date without triggering effect re-runs
+  const placeIdRef = useRef(placeId);
+  placeIdRef.current = placeId;
 
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
-
-    let didFetch = false;
-    const controller = new AbortController();
-
-    const fetchPhoto = async () => {
-      if (didFetch) return;
-      didFetch = true;
-
-      try {
-        const area = [spot.municipality, spot.prefecture]
-          .filter(Boolean)
-          .join(" ");
-        const params = new URLSearchParams({ name: spot.name, area });
-        const placeId = loadPlaceId(spot.id);
-        if (placeId) params.set("placeId", placeId);
-
-        const response = await fetch(`/api/spots/photo?${params.toString()}`, {
-          signal: controller.signal,
-        });
-        const data = (await response.json()) as { photoUrls: string[] };
-        const url = data.photoUrls[0] ?? null;
-
+  const doFetch = useCallback((pid: string) => {
+    if (didFetchRef.current) return;
+    didFetchRef.current = true;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    fetch(`/api/spots/photo?placeId=${encodeURIComponent(pid)}`, {
+      signal: ctrl.signal,
+    })
+      .then((r) => r.json() as Promise<{ photoUrls: string[] }>)
+      .then(({ photoUrls }) => {
+        const url = photoUrls[0] ?? null;
         startTransition(() => {
           setPhotoUrl(url);
           setStatus(url ? "loaded" : "none");
         });
-      } catch {
-        if (!controller.signal.aborted) {
-          startTransition(() => setStatus("none"));
-        }
-      }
-    };
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) startTransition(() => setStatus("none"));
+      });
+  }, []);
+
+  // placeId が null → "" or "ChIJ..." に変わったとき
+  useEffect(() => {
+    if (placeId === null) return;
+    if (placeId === "") {
+      startTransition(() => setStatus("none"));
+      return;
+    }
+    if (inViewportRef.current) doFetch(placeId);
+  }, [placeId, doFetch]);
+
+  // IntersectionObserver は一度だけセットアップ
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          observer.disconnect();
-          void fetchPhoto();
-        }
+        if (!entries.some((e) => e.isIntersecting)) return;
+        inViewportRef.current = true;
+        observer.disconnect();
+        const pid = placeIdRef.current;
+        if (pid) doFetch(pid);
       },
       { rootMargin: "200px" },
     );
-
     observer.observe(element);
 
     return () => {
       observer.disconnect();
-      controller.abort();
+      abortRef.current?.abort();
     };
-  }, [spot.id, spot.municipality, spot.name, spot.prefecture]);
+  }, [doFetch]);
 
   const fallback = categoryVisual[spot.category];
   const FallbackIcon = fallback.icon;
@@ -1290,51 +1322,71 @@ const SpotPhoto = memo(function SpotPhoto({ spot }: { spot: GeneratedSpot }) {
   );
 });
 
-const SpotThumbnail = memo(function SpotThumbnail({ spot }: { spot: GeneratedSpot }) {
+const SpotThumbnail = memo(function SpotThumbnail({
+  spot,
+  placeId,
+}: {
+  spot: GeneratedSpot;
+  placeId: string | null;
+}) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inViewportRef = useRef(false);
+  const didFetchRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const placeIdRef = useRef(placeId);
+  placeIdRef.current = placeId;
+
+  const doFetch = useCallback((pid: string) => {
+    if (didFetchRef.current) return;
+    didFetchRef.current = true;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    fetch(`/api/spots/photo?placeId=${encodeURIComponent(pid)}`, {
+      signal: ctrl.signal,
+    })
+      .then((r) => r.json() as Promise<{ photoUrls: string[] }>)
+      .then(({ photoUrls }) => {
+        startTransition(() => {
+          setPhotoUrl(photoUrls[0] ?? null);
+          setReady(true);
+        });
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) startTransition(() => setReady(true));
+      });
+  }, []);
+
+  useEffect(() => {
+    if (placeId === null) return;
+    if (placeId === "") {
+      startTransition(() => setReady(true));
+      return;
+    }
+    if (inViewportRef.current) doFetch(placeId);
+  }, [placeId, doFetch]);
 
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
 
-    let didFetch = false;
-    const controller = new AbortController();
-
-    const fetchPhoto = async () => {
-      if (didFetch) return;
-      didFetch = true;
-      try {
-        const area = [spot.municipality, spot.prefecture].filter(Boolean).join(" ");
-        const params = new URLSearchParams({ name: spot.name, area });
-        const placeId = loadPlaceId(spot.id);
-        if (placeId) params.set("placeId", placeId);
-        const response = await fetch(`/api/spots/photo?${params.toString()}`, {
-          signal: controller.signal,
-        });
-        const data = (await response.json()) as { photoUrls: string[] };
-        startTransition(() => {
-          setPhotoUrl(data.photoUrls[0] ?? null);
-          setReady(true);
-        });
-      } catch {
-        if (!controller.signal.aborted) startTransition(() => setReady(true));
-      }
-    };
-
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          observer.disconnect();
-          void fetchPhoto();
-        }
+        if (!entries.some((e) => e.isIntersecting)) return;
+        inViewportRef.current = true;
+        observer.disconnect();
+        const pid = placeIdRef.current;
+        if (pid) doFetch(pid);
       },
       { rootMargin: "200px" },
     );
     observer.observe(element);
-    return () => { observer.disconnect(); controller.abort(); };
-  }, [spot.id, spot.municipality, spot.name, spot.prefecture]);
+    return () => {
+      observer.disconnect();
+      abortRef.current?.abort();
+    };
+  }, [doFetch]);
 
   const fallback = categoryVisual[spot.category];
   const FallbackIcon = fallback.icon;
@@ -1369,6 +1421,7 @@ const SpotCard = memo(function SpotCard({
   isPinned,
   onToggleBlacklist,
   onTogglePin,
+  placeId,
   spot,
 }: {
   index: number;
@@ -1376,6 +1429,7 @@ const SpotCard = memo(function SpotCard({
   isPinned: boolean;
   onToggleBlacklist: (id: string) => void;
   onTogglePin: (id: string) => void;
+  placeId: string | null;
   spot: GeneratedSpot;
 }) {
   const budget =
@@ -1392,7 +1446,7 @@ const SpotCard = memo(function SpotCard({
       )}
       data-spot-id={spot.id}
     >
-      <SpotPhoto spot={spot} />
+      <SpotPhoto placeId={placeId} spot={spot} />
       <CardHeader>
         <div className="mb-2 flex items-center justify-between gap-2">
           <Badge variant="secondary">{spotCategoryLabels[spot.category]}</Badge>

@@ -19,18 +19,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const url = new URL(request.url);
-  const name = url.searchParams.get("name")?.trim();
-  const area = url.searchParams.get("area")?.trim() ?? "";
-  const placeId = url.searchParams.get("placeId")?.trim() || undefined;
+  const placeId = url.searchParams.get("placeId")?.trim();
 
-  if (!name) {
+  if (!placeId) {
     return jsonResponse([], 60);
   }
 
   try {
     const { photoUrls, cacheSeconds } = await resolveSpotPhotos({
-      name,
-      area,
       apiKey,
       placeId,
     });
