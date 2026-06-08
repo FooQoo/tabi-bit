@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/react-router";
 import {
   isRouteErrorResponse,
   Links,
@@ -9,6 +10,45 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { logger } from "./server/observability/logger";
+
+const requestLoggingMiddleware: Route.MiddlewareFunction = async (
+  { request },
+  next,
+) => {
+  const start = performance.now();
+  const { pathname } = new URL(request.url);
+  const isNoise = pathname.startsWith("/.well-known/");
+
+  let response: Response;
+  try {
+    response = await next();
+  } catch (error) {
+    logger.error("request", `${request.method} ${pathname}`, error, {
+      method: request.method,
+      path: pathname,
+      durationMs: Math.round(performance.now() - start),
+    });
+    throw error;
+  }
+
+  const durationMs = Math.round(performance.now() - start);
+  const level =
+    response.status >= 500 ? "error" : response.status >= 400 ? "warn" : "info";
+  if (isNoise && response.status < 400) return response;
+
+  logger[level]("request", undefined, {
+    method: request.method,
+    path: pathname,
+    status: response.status,
+    durationMs,
+  });
+  return response;
+};
+
+export const middleware: Route.MiddlewareFunction[] = [
+  requestLoggingMiddleware,
+];
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -59,6 +99,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     details = error.message;
     stack = error.stack;
+  }
+
+  if (error && error instanceof Error) {
+    Sentry.captureException(error);
   }
 
   return (
