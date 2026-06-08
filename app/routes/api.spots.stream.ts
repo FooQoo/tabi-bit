@@ -1,6 +1,7 @@
 import type { Route } from "./+types/api.spots.stream";
 import { generateSpotsRequestSchema } from "~/domain/spot/spot";
 import { generateSpots } from "~/server/services/spot-generation";
+import { logger } from "~/server/observability/logger";
 
 type StreamEvent =
   | { type: "spot"; spot: unknown }
@@ -14,12 +15,35 @@ function encodeEvent(event: StreamEvent) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  const abortSignal = request.signal;
+
   const stream = new ReadableStream({
     async start(controller) {
+      let closed = false;
+
+      const send = (event: StreamEvent) => {
+        if (closed || abortSignal.aborted) return;
+        try {
+          controller.enqueue(encodeEvent(event));
+        } catch {
+          closed = true;
+        }
+      };
+
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      };
+
       const fail = (message: string) => {
-        controller.enqueue(encodeEvent({ type: "error", message }));
-        controller.enqueue(encodeEvent({ type: "done" }));
-        controller.close();
+        send({ type: "error", message });
+        send({ type: "done" });
+        close();
       };
 
       try {
@@ -38,15 +62,23 @@ export async function action({ request }: Route.ActionArgs) {
         }
 
         for await (const spot of generateSpots(parsed.data)) {
-          controller.enqueue(encodeEvent({ type: "spot", spot }));
+          if (closed || abortSignal.aborted) return;
+          send({ type: "spot", spot });
         }
 
-        controller.enqueue(encodeEvent({ type: "done" }));
-        controller.close();
+        send({ type: "done" });
       } catch (error) {
-        console.error(error);
-        fail("スポット生成に失敗しました。");
+        if (!abortSignal.aborted) {
+          logger.error("spots.stream", "spot generation failed", error);
+          fail("スポット生成に失敗しました。");
+        }
+      } finally {
+        close();
       }
+    },
+    cancel() {
+      // Client disconnected; nothing to clean up because the start()
+      // closure observes abortSignal/closed and exits the loop.
     },
   });
 

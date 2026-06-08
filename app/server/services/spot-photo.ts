@@ -1,42 +1,38 @@
 import {
   fetchPhotoMediaUri,
-  searchPlacePhotoNames,
+  fetchPlacePhotoNamesByPlaceId,
 } from "~/server/repositories/google-places";
+import { logger } from "~/server/observability/logger";
 
-const MAX_PHOTOS = 5;
+const MAX_PHOTOS = 1;
 
 export type PhotoResolution = {
   photoUrls: string[];
-  /** この結果をどれだけキャッシュしてよいかの目安（秒）。 */
   cacheSeconds: number;
 };
 
 /**
- * スポット名・エリアから写真 URL 群を解決する。
- * 結果の安定度に応じてキャッシュ秒数を返す:
- * - 検索失敗 / 一部取得失敗: 300 秒（短期、再試行余地あり）
- * - 写真が存在しない: 86400 秒（安定）
- * - 写真取得成功: 86400 秒
+ * Place ID から写真 URL を解決する。
  */
 export async function resolveSpotPhotos({
-  name,
-  area,
   apiKey,
+  placeId,
 }: {
-  name: string;
-  area: string;
   apiKey: string;
+  placeId: string;
 }): Promise<PhotoResolution> {
-  const textQuery = `${name} ${area}`.trim();
-
-  const photoNames = await searchPlacePhotoNames(textQuery, apiKey, MAX_PHOTOS);
+  const photoNames = await fetchPlacePhotoNamesByPlaceId(
+    placeId,
+    apiKey,
+    MAX_PHOTOS,
+  );
 
   if (photoNames === null) {
     return { photoUrls: [], cacheSeconds: 300 };
   }
 
   if (photoNames.length === 0) {
-    console.log(`[places/photo] no photos found for: ${textQuery}`);
+    logger.info("places.photo", "no photos found", { placeId });
     return { photoUrls: [], cacheSeconds: 86_400 };
   }
 
@@ -44,9 +40,11 @@ export async function resolveSpotPhotos({
     photoNames.map((photoName) => fetchPhotoMediaUri(photoName, apiKey)),
   );
   const photoUrls = uris.filter((uri): uri is string => uri !== null);
-  console.log(
-    `[places/photo] "${textQuery}" → ${photoUrls.length}/${photoNames.length} photos`,
-  );
+  logger.info("places.photo", "photos resolved", {
+    placeId,
+    resolved: photoUrls.length,
+    requested: photoNames.length,
+  });
 
   return {
     photoUrls,

@@ -5,4 +5,6 @@ export default [
   route("sessions/:sessionId", "routes/session.tsx"),
   route("api/spots/stream", "routes/api.spots.stream.ts"),
   route("api/spots/photo", "routes/api.spots.photo.ts"),
+  route("api/spots/resolve", "routes/api.spots.resolve.ts"),
+  route(".well-known/*", "routes/well-known.$.ts"),
 ] satisfies RouteConfig;
