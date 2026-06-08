@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Coffee,
   Compass,
+  ExternalLink,
   Footprints,
   Landmark,
   type LucideIcon,
@@ -1302,13 +1303,18 @@ const SpotPhoto = memo(function SpotPhoto({
       ref={containerRef}
     >
       {status === "loaded" && photoUrl ? (
-        <img
-          alt={spot.name}
-          className="h-full w-full object-cover"
-          decoding="async"
-          loading="lazy"
-          src={photoUrl}
-        />
+        <>
+          <img
+            alt={spot.name}
+            className="h-full w-full object-cover"
+            decoding="async"
+            loading="lazy"
+            src={photoUrl}
+          />
+          <span className="absolute bottom-1.5 right-2 text-[10px] text-white/70 drop-shadow">
+            Powered by Google
+          </span>
+        </>
       ) : status === "loading" ? (
         <Skeleton className="h-full w-full rounded-none" />
       ) : (
@@ -1508,6 +1514,17 @@ const SpotCard = memo(function SpotCard({
             </p>
           ))}
         </div>
+        {placeId && (
+          <a
+            className="flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            href={`https://www.google.com/maps/place/?q=place_id:${placeId}`}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <ExternalLink className="size-3" />
+            Google マップで開く
+          </a>
+        )}
       </CardContent>
     </Card>
   );
