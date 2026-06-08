@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 
 import * as Sentry from "@sentry/react-router";
-import type { Route } from "./+types/home";
+import type { Route } from "./+types/_index";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import {

@@ -1,10 +1,4 @@
-import { type RouteConfig, index, route } from "@react-router/dev/routes";
+import type { RouteConfig } from "@react-router/dev/routes";
+import { flatRoutes } from "@react-router/fs-routes";
 
-export default [
-  index("routes/home.tsx"),
-  route("sessions/:sessionId", "routes/session.tsx"),
-  route("api/spots/stream", "routes/api.spots.stream.ts"),
-  route("api/spots/photo", "routes/api.spots.photo.ts"),
-  route("api/spots/resolve", "routes/api.spots.resolve.ts"),
-  route(".well-known/*", "routes/well-known.$.ts"),
-] satisfies RouteConfig;
+export default flatRoutes() satisfies RouteConfig;
