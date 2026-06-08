@@ -1,5 +1,10 @@
-const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
+import * as Sentry from "@sentry/react-router";
+import { logger } from "~/server/observability/logger";
+
 const PLACE_DETAILS_ENDPOINT = "https://places.googleapis.com/v1/places";
+const RESOLVE_NAMES_ENDPOINT =
+  "https://mapstools.googleapis.com/v1alpha:resolveNames";
+const RESOLVE_NAMES_BATCH_SIZE = 20;
 
 /**
  * Google Places API の認証キー。Places 用が無ければ Maps 用にフォールバックする。
@@ -8,41 +13,85 @@ export function getPlacesApiKey(): string | undefined {
   return process.env.GOOGLE_PLACES_API_KEY ?? process.env.GOOGLE_MAPS_API_KEY;
 }
 
-/**
- * テキスト検索で先頭の場所の Place ID を返す。失敗時は null。
- */
-export async function searchPlaceId(
-  textQuery: string,
+type ResolveNamesResponse = {
+  results?: Array<{
+    entity?: { place?: string };
+    confidence?: string;
+  }>;
+  failedRequests?: Record<string, { code?: number; message?: string }>;
+};
+
+function extractPlaceId(resourceName: string | undefined): string | null {
+  if (!resourceName) return null;
+  return resourceName.startsWith("places/")
+    ? resourceName.slice("places/".length)
+    : resourceName;
+}
+
+async function resolveNamesChunk(
+  texts: string[],
   apiKey: string,
-): Promise<string | null> {
-  const response = await fetch(SEARCH_ENDPOINT, {
+): Promise<Array<string | null>> {
+  const response = await fetch(RESOLVE_NAMES_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "places.id",
     },
     body: JSON.stringify({
-      textQuery,
-      languageCode: "ja",
+      queries: texts.map((text) => ({ text })),
       regionCode: "JP",
-      maxResultCount: 1,
     }),
   });
 
   if (!response.ok) {
     const body = await response.text();
-    console.error(
-      `[places/resolve] searchText failed (${response.status}):`,
+    logger.error("places.resolve", "resolveNames failed", undefined, {
+      status: response.status,
       body,
-    );
-    return null;
+    });
+    return texts.map(() => null);
   }
 
-  const data = (await response.json()) as {
-    places?: Array<{ id: string }>;
-  };
-  return data.places?.[0]?.id ?? null;
+  const data = (await response.json()) as ResolveNamesResponse;
+  const results = data.results ?? [];
+  if (data.failedRequests && Object.keys(data.failedRequests).length > 0) {
+    logger.warn("places.resolve", "resolveNames partial failures", {
+      failedRequests: data.failedRequests,
+    });
+  }
+  return texts.map((_, i) => extractPlaceId(results[i]?.entity?.place));
+}
+
+/**
+ * Resolution API (Grounding Lite) でテキスト→PlaceID をバッチ解決する。
+ * 最大20件/リクエストで自動チャンク分割。失敗要素は null で埋める。
+ */
+export async function resolvePlaceIdsByNames(
+  texts: string[],
+  apiKey: string,
+): Promise<Array<string | null>> {
+  if (texts.length === 0) return [];
+
+  return Sentry.startSpan(
+    {
+      name: "places.resolvePlaceIdsByNames",
+      op: "places.resolve",
+      attributes: {
+        "places.resolve.input_count": texts.length,
+        "places.resolve.chunk_size": RESOLVE_NAMES_BATCH_SIZE,
+      },
+    },
+    async () => {
+      const results: Array<string | null> = [];
+      for (let i = 0; i < texts.length; i += RESOLVE_NAMES_BATCH_SIZE) {
+        const chunk = texts.slice(i, i + RESOLVE_NAMES_BATCH_SIZE);
+        const chunkResults = await resolveNamesChunk(chunk, apiKey);
+        results.push(...chunkResults);
+      }
+      return results;
+    },
+  );
 }
 
 /**
@@ -62,10 +111,11 @@ export async function fetchPlacePhotoNamesByPlaceId(
 
   if (!response.ok) {
     const body = await response.text();
-    console.error(
-      `[places/photo] place details failed (${response.status}):`,
+    logger.error("places.photo", "place details failed", undefined, {
+      status: response.status,
       body,
-    );
+      placeId,
+    });
     return null;
   }
 
@@ -97,16 +147,16 @@ export async function fetchPhotoMediaUri(
     });
     if (!response.ok) {
       const body = await response.text();
-      console.error(
-        `[places/photo] media fetch failed (${response.status}):`,
+      logger.error("places.photo", "media fetch failed", undefined, {
+        status: response.status,
         body,
-      );
+      });
       return null;
     }
     const data = (await response.json()) as { photoUri?: string };
     return data.photoUri ?? null;
   } catch (error) {
-    console.error("[places/photo] media fetch error:", error);
+    logger.error("places.photo", "media fetch error", error);
     return null;
   }
 }

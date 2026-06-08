@@ -2,6 +2,7 @@ import {
   fetchPhotoMediaUri,
   fetchPlacePhotoNamesByPlaceId,
 } from "~/server/repositories/google-places";
+import { logger } from "~/server/observability/logger";
 
 const MAX_PHOTOS = 1;
 
@@ -31,7 +32,7 @@ export async function resolveSpotPhotos({
   }
 
   if (photoNames.length === 0) {
-    console.log(`[places/photo] no photos found for placeId: ${placeId}`);
+    logger.info("places.photo", "no photos found", { placeId });
     return { photoUrls: [], cacheSeconds: 86_400 };
   }
 
@@ -39,9 +40,11 @@ export async function resolveSpotPhotos({
     photoNames.map((photoName) => fetchPhotoMediaUri(photoName, apiKey)),
   );
   const photoUrls = uris.filter((uri): uri is string => uri !== null);
-  console.log(
-    `[places/photo] placeId=${placeId} → ${photoUrls.length}/${photoNames.length} photos`,
-  );
+  logger.info("places.photo", "photos resolved", {
+    placeId,
+    resolved: photoUrls.length,
+    requested: photoNames.length,
+  });
 
   return {
     photoUrls,

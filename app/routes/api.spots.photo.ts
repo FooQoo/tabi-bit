@@ -1,6 +1,7 @@
 import type { Route } from "./+types/api.spots.photo";
 import { getPlacesApiKey } from "~/server/repositories/google-places";
 import { resolveSpotPhotos } from "~/server/services/spot-photo";
+import { logger } from "~/server/observability/logger";
 
 function jsonResponse(photoUrls: string[], cacheSeconds: number) {
   return new Response(JSON.stringify({ photoUrls }), {
@@ -32,7 +33,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
     return jsonResponse(photoUrls, cacheSeconds);
   } catch (error) {
-    console.error("[places/photo] unexpected error:", error);
+    logger.error("places.photo", "unexpected error", error, { placeId });
     return jsonResponse([], 60);
   }
 }
