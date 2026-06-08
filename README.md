@@ -46,7 +46,7 @@
 | 観測性 | [Sentry](https://sentry.io/)（React Router 統合 + プロファイリング） / [Pino](https://getpino.io/) |
 | ビルド / テスト | Vite 8 / Vitest 4 |
 | パッケージマネージャ | **pnpm** |
-| デプロイ | Vercel（公式 React Router プリセット）／ Docker |
+| デプロイ | Vercel（公式 React Router プリセット） |
 
 ## ディレクトリ構成
 
